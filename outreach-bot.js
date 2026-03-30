@@ -24,10 +24,10 @@ let prospects = [
   { id: 15, name: "Will",           business: "Comfort Zone Home Services", phone: "",             status: "pending", notes: "Has Facebook page",               called: false, result: null, calledAt: null },
 ];
 
-const SARAH_SYSTEM_PROMPT = `You are Sarah, a friendly and natural-sounding sales rep calling on behalf of AQ Solutions. You're based in Ocean County, New Jersey. Your boss Andrew built an AI system that answers business calls 24/7 for plumbing and HVAC companies.
+const JOSH_SYSTEM_PROMPT = `You are Josh, a friendly and natural-sounding sales rep calling on behalf of AQ Solutions. You're based in Ocean County, New Jersey. Your boss Andrew built an AI system that answers business calls 24/7 for plumbing and HVAC companies.
 
 ## YOUR PERSONALITY
-- You sound like a real local person, NOT a robot or telemarketer
+- You sound like a real local guy, NOT a robot or telemarketer
 - You're warm, casual, and respectful of their time
 - You speak naturally with small talk and verbal fillers like "yeah", "honestly", "you know"
 - You NEVER sound scripted or pushy
@@ -37,7 +37,7 @@ const SARAH_SYSTEM_PROMPT = `You are Sarah, a friendly and natural-sounding sale
 ## CALL FLOW
 
 ### 1. OPENING
-- "Hey, is this [contact name]? My name's Sarah, I work with a company called AQ Solutions right here in Ocean County. Got a real quick question for you if you've got 30 seconds."
+- "Hey, is this [contact name]? My name's Josh, I work with a company called AQ Solutions right here in Ocean County. Got a real quick question for you if you've got 30 seconds."
 
 ### 2. QUALIFYING QUESTION
 - "So quick question — do you guys have somebody handling your phones after hours? Like nights and weekends, when calls come in?"
@@ -67,7 +67,7 @@ const OUTBOUND_ASSISTANT_CONFIG = {
     provider: "openai",
     model: "gpt-4o",
     temperature: 0.7,
-    systemPrompt: SARAH_SYSTEM_PROMPT,
+    systemPrompt: JOSH_SYSTEM_PROMPT,
     tools: [
       {
         type: "function",
@@ -125,11 +125,11 @@ const OUTBOUND_ASSISTANT_CONFIG = {
   },
   voice: {
     provider: "11labs",
-    voiceId: "21m00Tcm4TlvDq8ikWAM",
+    voiceId: "TxGEqnHWrfWFTfGW9XjX",
     stability: 0.6,
     similarityBoost: 0.75,
   },
-  firstMessage: "Hey, is this {{customerName}}? My name's Sarah, I work with a company called AQ Solutions right here in Ocean County. Got a real quick question for you if you've got 30 seconds.",
+  firstMessage: "Hey, is this {{customerName}}? My name's Josh, I work with a company called AQ Solutions right here in Ocean County. Got a real quick question for you if you've got 30 seconds.",
   serverUrl: process.env.WEBHOOK_URL || "https://YOUR-RAILWAY-URL.up.railway.app/vapi/outreach-webhook",
   endCallPhrases: ["goodbye", "have a good one", "take care"],
   maxDurationSeconds: 300,
