@@ -1,18 +1,13 @@
 {
-  "name": "aqsolutions-outreach-bot",
+  "name": "aq-outreach-bot",
   "version": "1.0.0",
-  "description": "AQ Solutions — Vapi Outbound Sales Calling Engine",
+  "type": "module",
   "main": "outreach-bot.js",
   "scripts": {
-    "start": "node outreach-bot.js",
-    "dev": "node outreach-bot.js"
+    "start": "node outreach-bot.js"
   },
   "dependencies": {
-    "cors": "^2.8.5",
     "express": "^4.18.2",
-    "twilio": "^4.23.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "twilio": "^5.0.0"
   }
 }
