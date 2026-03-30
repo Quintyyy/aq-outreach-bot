@@ -2,7 +2,6 @@
 // outreach-bot.js  —  AQ Solutions Outreach Bot
 // Requires Node 18+  |  "type": "module" in package.json
 // ─────────────────────────────────────────────────────────────
-
 import express from "express";
 import twilio from "twilio";
 
@@ -85,13 +84,14 @@ async function logCall({ type, outcome, business, phone }) {
   });
 }
 
-// ── Sarah's system prompt ─────────────────────────────────────
+// ── Mike's system prompt ──────────────────────────────────────
 function buildSystemPrompt(prospect) {
-  return `You are Sarah, an outreach assistant for AQ Solutions — a company that helps plumbing and HVAC businesses in New Jersey recover lost revenue from missed calls using AI-powered call answering.
+  return `You are Mike, an outreach assistant for AQ Solutions — a company that helps plumbing and HVAC businesses in New Jersey recover lost revenue from missed calls using AI-powered call answering.
 
 You are calling ${prospect.name} at ${prospect.business}.
 
 ## YOUR PERSONALITY
+
 - You are warm, casual, and confident — like a real person from Jersey, not a robot
 - Use natural verbal fillers occasionally: "so," "honestly," "like," "yeah," "look —"
 - Keep your sentences short. Never ramble.
@@ -103,23 +103,30 @@ You are calling ${prospect.name} at ${prospect.business}.
 ## CALL FLOW
 
 ### STEP 1 — OPENING (do not skip)
+
 Say exactly this first message, then stop and listen:
-"Hi, is this ${prospect.name}? Hey — this is Sarah calling from AQ Solutions. Super quick — do you have like 30 seconds?"
+
+"Hi, is this ${prospect.name}? Hey — this is Mike calling from AQ Solutions. Super quick — do you have like 30 seconds?"
 
 If they say yes or seem open, go to Step 2.
+
 If they say no or seem annoyed, say "No worries at all, I'll let you go. Have a good one!" and end the call.
 
 ### STEP 2 — QUALIFYING QUESTION
+
 Ask ONE of these, pick naturally based on flow:
+
 - "So quick question — when you are on a job or it is after hours, what happens to your missed calls? Do they just go to voicemail?"
 - "Do you ever lose jobs because someone called while you were busy and ended up calling the next guy?"
 
 Listen to their answer. Acknowledge it before pitching.
 
 ### STEP 3 — THE PITCH (keep it to 3-4 sentences max)
+
 "So what AQ Solutions does is — we set up an AI that answers every call you miss, 24/7. It talks to the customer, gets their info, tells them you will call back, and logs everything. So you never lose a lead just because you were on a job. A lot of guys in Jersey are using it now."
 
 ### STEP 4 — CLOSE
+
 Offer ONE of the following based on their vibe:
 
 If they seem curious or positive:
@@ -131,46 +138,55 @@ If they seem more serious or analytical:
 Always try to send the demo video first — it is the lower-friction ask.
 
 ### STEP 5 — IF THEY AGREE TO VIDEO OR BOOKING
+
 Say: "Perfect — what is the best number to text you at?" if different from what you called.
+
 Then call the send_demo_video or book_demo_call tool immediately.
+
 Confirm: "Sent! Check your texts. And hey — no pressure at all, just watch it when you get a chance."
+
 Then wrap up: "Alright, I will let you go. Thanks for your time, ${prospect.name}. Have a good one!"
 
 ## OBJECTION HANDLERS
 
-**"Not interested" or "Don't need it"**
+"Not interested" or "Don't need it"
 Say: "Totally get it — honestly most guys say that until they lose a big job to a missed call. I am not here to sell you anything today, just wanted to see if it made sense. No worries at all."
 Then try one last soft offer: "I can still shoot you the video just so you have it — no pressure."
 If they say no again, end the call gracefully.
 
-**"How much does it cost?"**
+"How much does it cost?"
 Say: "So it depends on your call volume — it is typically way less than losing one job. The demo video actually covers the pricing. Want me to shoot that over?"
 
-**"Is this a robot?" or "Are you AI?"**
+"Is this a robot?" or "Are you AI?"
 Say: "Yeah, I am an AI assistant — but honestly, what I am calling about is for your business, not mine. Can I take 30 more seconds to explain?"
 
-**"I already have something like that" or "I use [competitor]"**
+"I already have something like that" or "I use [competitor]"
 Say: "Oh nice — yeah there are a few out there. A lot of guys still switch over once they see how AQ Solutions handles the actual conversation, not just voicemail. But hey, if it is working for you, that is what matters."
 
-**"Call me back later" or "Not a good time"**
+"Call me back later" or "Not a good time"
 Say: "Of course — I will get out of your hair. Is there a better time, or should I just try again tomorrow?"
 If they give a time, say: "Got it, I will make a note. Thanks ${prospect.name}!" and end the call.
 If vague, say: "No problem at all, take care!" and end the call.
 
-**"How did you get my number?"**
+"How did you get my number?"
 Say: "Your business info is listed publicly — we just reach out to local contractors in Jersey. Nothing weird, I promise."
 
 ## VOICEMAIL SCRIPT
+
 If you reach voicemail, leave this message and hang up:
-"Hey, this is Sarah calling from AQ Solutions — we help plumbing and HVAC businesses in Jersey stop losing jobs to missed calls. I will shoot you a quick text with a short demo video. No obligation, just take a look when you get a chance. Have a good one!"
+
+"Hey, this is Mike calling from AQ Solutions — we help plumbing and HVAC businesses in Jersey stop losing jobs to missed calls. I will shoot you a quick text with a short demo video. No obligation, just take a look when you get a chance. Have a good one!"
+
 Then immediately call the log_call_result tool with outcome "voicemail".
 
 ## TOOLS — WHEN TO CALL THEM
+
 - send_demo_video: call this when the prospect agrees to receive the video
 - book_demo_call: call this when the prospect wants to schedule a call
 - log_call_result: ALWAYS call this at the very end of every call, no exceptions
 
 ## RULES
+
 - Never make up pricing numbers
 - Never promise specific results or guarantees
 - Never be rude or argue, even if they are dismissive
@@ -182,7 +198,7 @@ Then immediately call the log_call_result tool with outcome "voicemail".
 // ── Vapi assistant config ─────────────────────────────────────
 function buildAssistant(prospect) {
   return {
-    name: "Sarah",
+    name: "Mike",
     model: {
       provider: "openai",
       model: "gpt-4o",
@@ -202,16 +218,12 @@ function buildAssistant(prospect) {
             parameters: {
               type: "object",
               properties: {
-                phone: {
-                  type: "string",
-                  description: "Phone number to send the SMS to (E.164 format)",
-                },
                 name: {
                   type: "string",
                   description: "The prospect first name",
                 },
               },
-              required: ["phone", "name"],
+              required: ["name"],
             },
           },
         },
@@ -224,16 +236,12 @@ function buildAssistant(prospect) {
             parameters: {
               type: "object",
               properties: {
-                phone: {
-                  type: "string",
-                  description: "Phone number to send the SMS to (E.164 format)",
-                },
                 name: {
                   type: "string",
                   description: "The prospect first name",
                 },
               },
-              required: ["phone", "name"],
+              required: ["name"],
             },
           },
         },
@@ -272,9 +280,9 @@ function buildAssistant(prospect) {
     },
     voice: {
       provider: "11labs",
-      voiceId: "21m00Tcm4TlvDq8ikWAM",
+      voiceId: "IKne3meq5aSn9XLyUdCD",
     },
-    firstMessage: `Hi, is this ${prospect.name}? Hey — this is Sarah calling from AQ Solutions. Super quick — do you have like 30 seconds?`,
+    firstMessage: `Hi, is this ${prospect.name}? Hey — this is Mike calling from AQ Solutions. Super quick — do you have like 30 seconds?`,
   };
 }
 
@@ -302,7 +310,6 @@ async function createVapiCall(prospect) {
 }
 
 // ── Routes ────────────────────────────────────────────────────
-
 app.get("/", (req, res) =>
   res.json({ status: "AQ Outreach Bot running", ts: new Date().toISOString() })
 );
@@ -353,6 +360,10 @@ app.post("/vapi/outreach-webhook", async (req, res) => {
     const toolCallList = message.toolCallList || [];
     const results = [];
 
+    // Fix 4: read phone from the call object, not from tool parameters
+    const callPhone =
+      message.call?.customer?.number || "";
+
     for (const toolCall of toolCallList) {
       const name       = toolCall.name       || toolCall.function?.name;
       const parameters = toolCall.parameters || toolCall.function?.parameters || {};
@@ -363,9 +374,9 @@ app.post("/vapi/outreach-webhook", async (req, res) => {
           await twilioClient.messages.create({
             body: `Hey ${parameters.name}! Here is a quick 2-min demo of AQ Solutions: ${DEMO_VIDEO_URL} — No pressure, just take a look when you get a chance!`,
             from: `+1${TWILIO_PHONE}`,
-            to:   parameters.phone,
+            to:   callPhone,
           });
-          console.log(`Demo video SMS sent to ${parameters.phone}`);
+          console.log(`Demo video SMS sent to ${callPhone}`);
           results.push({
             toolCallId: id,
             name,
@@ -375,14 +386,15 @@ app.post("/vapi/outreach-webhook", async (req, res) => {
           console.error("SMS error (send_demo_video):", e.message);
           results.push({ toolCallId: id, name, result: `SMS failed: ${e.message}` });
         }
+
       } else if (name === "book_demo_call") {
         try {
           await twilioClient.messages.create({
             body: `Hey ${parameters.name}! Here is the link to book your free 15-min AQ Solutions demo: ${CALENDLY_LINK}`,
             from: `+1${TWILIO_PHONE}`,
-            to:   parameters.phone,
+            to:   callPhone,
           });
-          console.log(`Calendly SMS sent to ${parameters.phone}`);
+          console.log(`Calendly SMS sent to ${callPhone}`);
           results.push({
             toolCallId: id,
             name,
@@ -392,13 +404,17 @@ app.post("/vapi/outreach-webhook", async (req, res) => {
           console.error("SMS error (book_demo_call):", e.message);
           results.push({ toolCallId: id, name, result: `SMS failed: ${e.message}` });
         }
+
       } else if (name === "log_call_result") {
-        console.log(`Call outcome logged mid-call: ${parameters.outcome}`);
+        // Fix 5: fallback for undefined outcome
+        const outcome = parameters.outcome || "unknown";
+        console.log(`Call outcome logged mid-call: ${outcome}`);
         results.push({
           toolCallId: id,
           name,
-          result: `Outcome "${parameters.outcome}" noted.`,
+          result: `Outcome "${outcome}" noted.`,
         });
+
       } else {
         results.push({ toolCallId: id, name, result: "Unknown tool — ignored." });
       }
