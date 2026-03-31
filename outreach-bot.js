@@ -280,7 +280,7 @@ function buildAssistant(prospect) {
     },
     voice: {
       provider: "11labs",
-      voiceId: "TelnL2lJmhmJsbXVaz6M",
+      voiceId: "VOICE_ID_HERE",
     },
     firstMessage: `Hi, is this ${prospect.name}? Hey — this is Mike calling from AQ Solutions. Super quick — do you have like 30 seconds?`,
   };
