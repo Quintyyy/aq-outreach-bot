@@ -6,580 +6,297 @@
 <title>AQ Solutions — Outreach Command Center</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0a0a0f;
-    --surface: #12121a;
-    --surface-2: #1a1a26;
-    --surface-3: #222233;
-    --border: #2a2a3d;
-    --text: #e8e8f0;
-    --text-dim: #8888a0;
-    --text-muted: #55556a;
-    --accent: #4f8cff;
-    --accent-glow: rgba(79, 140, 255, 0.15);
-    --green: #34d399;
-    --green-dim: rgba(52, 211, 153, 0.15);
-    --yellow: #fbbf24;
-    --yellow-dim: rgba(251, 191, 36, 0.15);
-    --red: #f87171;
-    --red-dim: rgba(248, 113, 113, 0.15);
-    --orange: #fb923c;
-    --orange-dim: rgba(251, 146, 60, 0.15);
-    --purple: #a78bfa;
-    --purple-dim: rgba(167, 139, 250, 0.15);
-    --radius: 10px;
-    --font: 'DM Sans', -apple-system, sans-serif;
-    --mono: 'JetBrains Mono', monospace;
-  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+  body { font-family: 'DM Sans', sans-serif; background: #0a0b14; color: #e2e8f0; min-height: 100vh; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
 
-  /* ── HEADER ── */
-  .header {
-    padding: 24px 32px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  .header-left { display: flex; align-items: center; gap: 16px; }
-  .logo {
-    width: 40px; height: 40px; border-radius: 10px;
-    background: linear-gradient(135deg, var(--accent), #7c5cfc);
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 16px; color: white;
-  }
-  .header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
-  .header .subtitle { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
-  .header-right { display: flex; align-items: center; gap: 12px; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .status-text { font-size: 13px; color: var(--text-dim); font-family: var(--mono); }
-  .airtable-badge {
-    font-size: 11px; padding: 4px 10px; border-radius: 20px;
-    font-family: var(--mono); font-weight: 500;
-  }
-  .airtable-badge.connected { background: var(--green-dim); color: var(--green); }
-  .airtable-badge.disconnected { background: var(--yellow-dim); color: var(--yellow); }
+  /* Header */
+  .header { padding: 24px 28px 18px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; }
+  .header h1 { font-size: 20px; font-weight: 700; color: #f8fafc; letter-spacing: -0.02em; }
+  .header .sub { font-size: 11px; color: #64748b; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .status-dot.on { background: #10b981; box-shadow: 0 0 8px #10b98180; }
+  .status-dot.off { background: #ef4444; box-shadow: 0 0 8px #ef444480; }
+  .status-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; }
 
-  /* ── LAYOUT ── */
-  .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; padding: 18px 28px; }
+  .stat { padding: 14px; border-radius: 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); }
+  .stat-val { font-size: 24px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .stat-label { font-size: 10px; color: #64748b; font-weight: 500; margin-top: 3px; letter-spacing: 0.05em; text-transform: uppercase; }
 
-  /* ── STATS ── */
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
-    margin-bottom: 28px;
-  }
-  .stat-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px 18px;
-    position: relative;
-    overflow: hidden;
-  }
-  .stat-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0;
-    width: 3px; height: 100%;
-  }
-  .stat-card.total::before { background: var(--accent); }
-  .stat-card.pending::before { background: var(--yellow); }
-  .stat-card.called::before { background: var(--purple); }
-  .stat-card.interested::before { background: var(--green); }
-  .stat-card.demos::before { background: var(--orange); }
-  .stat-card.booked::before { background: var(--green); }
-  .stat-card.rejected::before { background: var(--red); }
-  .stat-card.voicemail::before { background: var(--text-dim); }
-  .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-weight: 600; margin-bottom: 6px; }
-  .stat-value { font-size: 28px; font-weight: 700; font-family: var(--mono); }
-  .stat-card.total .stat-value { color: var(--accent); }
-  .stat-card.pending .stat-value { color: var(--yellow); }
-  .stat-card.called .stat-value { color: var(--purple); }
-  .stat-card.interested .stat-value { color: var(--green); }
-  .stat-card.demos .stat-value { color: var(--orange); }
-  .stat-card.booked .stat-value { color: var(--green); }
-  .stat-card.rejected .stat-value { color: var(--red); }
-  .stat-card.voicemail .stat-value { color: var(--text-dim); }
+  /* Actions */
+  .actions { padding: 0 28px 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .btn { padding: 10px 20px; border-radius: 9px; border: none; font-weight: 600; font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: filter 0.15s; }
+  .btn:hover { filter: brightness(1.1); }
+  .btn-primary { background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; }
+  .btn-primary:disabled { background: rgba(255,255,255,0.04); color: #4a5568; cursor: default; }
+  .btn-secondary { background: rgba(255,255,255,0.03); color: #94a3b8; border: 1px solid rgba(255,255,255,0.07); }
 
-  /* ── TABS ── */
-  .tabs { display: flex; gap: 4px; margin-bottom: 20px; background: var(--surface); border-radius: var(--radius); padding: 4px; border: 1px solid var(--border); width: fit-content; }
-  .tab {
-    padding: 8px 20px; border-radius: 7px; font-size: 13px; font-weight: 600;
-    cursor: pointer; color: var(--text-dim); border: none; background: transparent;
-    transition: all 0.2s;
-  }
-  .tab:hover { color: var(--text); }
-  .tab.active { background: var(--accent); color: white; }
+  /* Tabs */
+  .tabs { padding: 0 28px 12px; display: flex; gap: 4px; }
+  .tab { padding: 8px 16px; border-radius: 8px; border: none; font-size: 12px; font-weight: 500; cursor: pointer; background: transparent; color: #64748b; font-family: 'DM Sans', sans-serif; }
+  .tab.active { background: rgba(59,130,246,0.15); color: #60a5fa; }
 
-  /* ── ACTION BAR ── */
-  .action-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-  .btn {
-    padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600;
-    cursor: pointer; border: 1px solid var(--border); font-family: var(--font);
-    transition: all 0.15s; display: flex; align-items: center; gap: 6px;
-  }
-  .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
-  .btn-primary:hover { background: #3d7ae8; }
-  .btn-success { background: var(--green-dim); color: var(--green); border-color: rgba(52, 211, 153, 0.3); }
-  .btn-success:hover { background: rgba(52, 211, 153, 0.25); }
-  .btn-danger { background: var(--red-dim); color: var(--red); border-color: rgba(248, 113, 113, 0.3); }
-  .btn-danger:hover { background: rgba(248, 113, 113, 0.25); }
-  .btn-ghost { background: var(--surface-2); color: var(--text-dim); }
-  .btn-ghost:hover { color: var(--text); background: var(--surface-3); }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  /* List */
+  .list { padding: 0 28px 28px; display: flex; flex-direction: column; gap: 5px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: rgba(255,255,255,0.015); border: 1px solid rgba(255,255,255,0.04); border-radius: 9px; }
+  .row-icon { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .row-info { flex: 1; min-width: 0; }
+  .row-biz { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+  .row-meta { font-size: 11px; color: #64748b; margin-top: 2px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 500; }
+  .btn-call { padding: 7px 16px; border-radius: 7px; border: none; font-weight: 600; font-size: 11px; background: rgba(59,130,246,0.1); color: #60a5fa; cursor: pointer; white-space: nowrap; }
+  .btn-call:disabled { opacity: 0.5; }
+  .empty { text-align: center; padding: 50px; color: #4a5568; }
+  .empty-icon { font-size: 28px; margin-bottom: 8px; }
 
-  /* ── TABLE ── */
-  .table-wrap {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    overflow: hidden;
-  }
-  table { width: 100%; border-collapse: collapse; }
-  th {
-    text-align: left; padding: 12px 16px; font-size: 11px;
-    text-transform: uppercase; letter-spacing: 1px;
-    color: var(--text-muted); font-weight: 600;
-    background: var(--surface-2); border-bottom: 1px solid var(--border);
-  }
-  td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: var(--surface-2); }
+  /* Toast */
+  .toast { position: fixed; top: 20px; right: 20px; z-index: 9999; padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 500; max-width: 340px; backdrop-filter: blur(12px); transition: opacity 0.3s; }
+  .toast.success { background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); color: #34d399; }
+  .toast.error { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+  .toast.hidden { opacity: 0; pointer-events: none; }
 
-  .status-badge {
-    display: inline-block; padding: 3px 10px; border-radius: 20px;
-    font-size: 11px; font-weight: 600; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.5px;
-  }
-  .status-pending { background: var(--yellow-dim); color: var(--yellow); }
-  .status-calling { background: var(--accent-glow); color: var(--accent); animation: pulse 1.5s infinite; }
-  .status-interested, .status-demo_sent, .status-demo_booked { background: var(--green-dim); color: var(--green); }
-  .status-not_interested { background: var(--red-dim); color: var(--red); }
-  .status-voicemail, .status-no_answer { background: rgba(136, 136, 160, 0.15); color: var(--text-dim); }
-  .status-callback_requested { background: var(--orange-dim); color: var(--orange); }
-  .status-call_failed, .status-wrong_number { background: var(--red-dim); color: var(--red); }
-
-  .phone-col { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
-  .no-phone { color: var(--text-muted); font-style: italic; }
-  .actions-cell { display: flex; gap: 6px; }
-  .btn-sm {
-    padding: 5px 10px; font-size: 11px; border-radius: 6px;
-    cursor: pointer; border: 1px solid var(--border);
-    font-family: var(--font); font-weight: 600; transition: all 0.15s;
-  }
-  .btn-call { background: var(--green-dim); color: var(--green); border-color: rgba(52, 211, 153, 0.3); }
-  .btn-call:hover { background: rgba(52, 211, 153, 0.25); }
-  .btn-edit { background: var(--surface-2); color: var(--text-dim); }
-  .btn-edit:hover { color: var(--text); }
-  .btn-reset { background: var(--yellow-dim); color: var(--yellow); border-color: rgba(251, 191, 36, 0.3); }
-  .btn-reset:hover { background: rgba(251, 191, 36, 0.25); }
-  .btn-delete { background: var(--red-dim); color: var(--red); border-color: rgba(248, 113, 113, 0.3); }
-  .btn-delete:hover { background: rgba(248, 113, 113, 0.25); }
-  .btn-sm:disabled { opacity: 0.3; cursor: not-allowed; }
-
-  /* ── MODAL ── */
-  .modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
-    z-index: 1000; align-items: center; justify-content: center;
-  }
-  .modal-overlay.active { display: flex; }
-  .modal {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 14px; padding: 28px; width: 420px; max-width: 90vw;
-  }
-  .modal h2 { font-size: 18px; margin-bottom: 20px; font-weight: 700; }
-  .form-group { margin-bottom: 14px; }
-  .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .form-group input, .form-group textarea, .form-group select {
-    width: 100%; padding: 10px 12px; border-radius: 8px;
-    border: 1px solid var(--border); background: var(--surface-2);
-    color: var(--text); font-family: var(--font); font-size: 14px;
-    outline: none; transition: border-color 0.15s;
-  }
-  .form-group input:focus, .form-group textarea:focus { border-color: var(--accent); }
-  .form-group textarea { resize: vertical; min-height: 60px; }
-  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
-
-  /* ── CALL LOG ── */
-  .log-entry {
-    padding: 12px 16px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 14px;
-  }
-  .log-entry:last-child { border-bottom: none; }
-  .log-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
-  .log-icon.demo_sent { background: var(--orange-dim); }
-  .log-icon.demo_booked { background: var(--green-dim); }
-  .log-icon.call_result { background: var(--purple-dim); }
-  .log-details { flex: 1; }
-  .log-business { font-weight: 600; font-size: 13px; }
-  .log-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-  .log-time { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
-
-  .empty-state { padding: 60px 20px; text-align: center; color: var(--text-muted); }
-  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
-  .empty-state p { font-size: 14px; }
-
-  /* ── TOAST ── */
-  .toast {
-    position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
-    border-radius: 10px; font-size: 13px; font-weight: 600;
-    z-index: 2000; transform: translateY(100px); opacity: 0;
-    transition: all 0.3s; font-family: var(--font);
-  }
-  .toast.show { transform: translateY(0); opacity: 1; }
-  .toast.success { background: var(--green); color: #0a0a0f; }
-  .toast.error { background: var(--red); color: white; }
-  .toast.info { background: var(--accent); color: white; }
-
-  @media (max-width: 768px) {
-    .container { padding: 16px; }
-    .header { padding: 16px; }
-    .stats-grid { grid-template-columns: repeat(2, 1fr); }
-    .action-bar { flex-direction: column; }
-    table { font-size: 12px; }
-    th, td { padding: 8px 10px; }
-    .actions-cell { flex-wrap: wrap; }
-  }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
 </style>
 </head>
 <body>
 
+<div id="toast" class="toast hidden"></div>
+
+<!-- Header -->
 <div class="header">
   <div class="header-left">
     <div class="logo">AQ</div>
     <div>
       <h1>AQ Solutions</h1>
-      <div class="subtitle">Outreach Command Center</div>
+      <div class="sub">OUTREACH COMMAND CENTER</div>
     </div>
   </div>
-  <div class="header-right">
-    <span class="airtable-badge disconnected" id="airtable-status">Checking...</span>
-    <div class="status-dot"></div>
-    <span class="status-text">LIVE</span>
-  </div>
-</div>
-
-<div class="container">
-  <!-- STATS -->
-  <div class="stats-grid" id="stats-grid"></div>
-
-  <!-- TABS -->
-  <div class="tabs">
-    <button class="tab active" data-tab="prospects">Prospects</button>
-    <button class="tab" data-tab="log">Call Log</button>
-  </div>
-
-  <!-- ACTION BAR -->
-  <div class="action-bar" id="action-bar">
-    <button class="btn btn-primary" onclick="openAddModal()">+ Add Prospect</button>
-    <button class="btn btn-success" onclick="callAllPending()">&#9742; Call All Pending</button>
-    <button class="btn btn-ghost" onclick="loadData()">&#8635; Refresh</button>
-  </div>
-
-  <!-- PROSPECTS TABLE -->
-  <div id="prospects-tab">
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Contact</th>
-            <th>Business</th>
-            <th>Phone</th>
-            <th>Status</th>
-            <th>Notes</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="prospects-body"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- CALL LOG -->
-  <div id="log-tab" style="display:none;">
-    <div class="table-wrap" id="call-log-container"></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span id="statusDot" class="status-dot off"></span>
+    <span id="statusLabel" class="status-label" style="color:#ef4444">OFFLINE</span>
   </div>
 </div>
 
-<!-- ADD/EDIT MODAL -->
-<div class="modal-overlay" id="modal-overlay">
-  <div class="modal">
-    <h2 id="modal-title">Add Prospect</h2>
-    <div class="form-group">
-      <label>Contact Name</label>
-      <input type="text" id="f-name" placeholder="Owner">
-    </div>
-    <div class="form-group">
-      <label>Business Name</label>
-      <input type="text" id="f-business" placeholder="ABC Plumbing">
-    </div>
-    <div class="form-group">
-      <label>Phone</label>
-      <input type="text" id="f-phone" placeholder="+17325551234">
-    </div>
-    <div class="form-group">
-      <label>Notes</label>
-      <textarea id="f-notes" placeholder="Any notes..."></textarea>
-    </div>
-    <input type="hidden" id="f-id">
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveProspect()">Save</button>
-    </div>
-  </div>
+<!-- Stats -->
+<div class="stats" id="statsRow"></div>
+
+<!-- Actions -->
+<div class="actions">
+  <button class="btn btn-primary" id="btnRun" disabled>📞 Call All (0)</button>
+  <button class="btn btn-secondary" onclick="refresh()">↻ Refresh</button>
 </div>
 
-<!-- TOAST -->
-<div class="toast" id="toast"></div>
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab active" id="tabProspects" onclick="switchTab('prospects')">Prospects (0)</button>
+  <button class="tab" id="tabCalllog" onclick="switchTab('calllog')">Call Log (0)</button>
+</div>
+
+<!-- Content -->
+<div id="content" class="list"></div>
 
 <script>
 const API = window.location.origin;
-let allProspects = [];
-let allStats = {};
+let prospects = [];
+let callLog = [];
+let currentTab = "prospects";
+let calling = null;
 
-// ── DATA ──
-async function loadData() {
+const statusColors = {
+  "pending":            { icon: "○", color: "#94a3b8", bg: "rgba(148,163,184,0.10)" },
+  "interested":         { icon: "★", color: "#38bdf8", bg: "rgba(56,189,248,0.12)" },
+  "demo video sent":    { icon: "▶", color: "#34d399", bg: "rgba(52,211,153,0.12)" },
+  "booking link sent":  { icon: "✓", color: "#10b981", bg: "rgba(16,185,129,0.15)" },
+  "callback requested": { icon: "↩", color: "#c084fc", bg: "rgba(192,132,252,0.12)" },
+  "not interested":     { icon: "✕", color: "#64748b", bg: "rgba(100,116,139,0.10)" },
+  "voicemail":          { icon: "✉", color: "#fb923c", bg: "rgba(251,146,60,0.12)" },
+  "no answer":          { icon: "✕", color: "#f87171", bg: "rgba(248,113,113,0.12)" },
+  "unknown":            { icon: "?", color: "#64748b", bg: "rgba(100,116,139,0.10)" },
+};
+
+function getStatus(s) {
+  return statusColors[(s || "pending").toLowerCase()] || statusColors["unknown"];
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "toast " + (type || "success");
+  setTimeout(() => t.className = "toast hidden", 3500);
+}
+
+async function fetchProspects() {
   try {
-    const res = await fetch(`${API}/api/prospects`);
+    const res = await fetch(API + "/prospects");
     const data = await res.json();
-    allProspects = data.prospects;
-    allStats = data.stats;
-    renderStats();
-    renderProspects();
-    loadCallLog();
-    checkAirtable();
-  } catch (err) {
-    showToast('Failed to load data', 'error');
+    prospects = data.prospects || [];
+    document.getElementById("statusDot").className = "status-dot on";
+    document.getElementById("statusLabel").style.color = "#10b981";
+    document.getElementById("statusLabel").textContent = "LIVE";
+  } catch(e) {
+    document.getElementById("statusDot").className = "status-dot off";
+    document.getElementById("statusLabel").style.color = "#ef4444";
+    document.getElementById("statusLabel").textContent = "OFFLINE";
   }
 }
 
-async function loadCallLog() {
+async function fetchCallLog() {
   try {
-    const res = await fetch(`${API}/api/call-log`);
+    const res = await fetch(API + "/call-log");
     const data = await res.json();
-    renderCallLog(data.log);
-  } catch (err) {}
+    callLog = data.log || data.logs || [];
+  } catch(e) {}
 }
 
-async function checkAirtable() {
-  try {
-    const res = await fetch(`${API}/`);
-    const data = await res.json();
-    const badge = document.getElementById('airtable-status');
-    if (data.airtable) {
-      badge.textContent = 'Airtable Synced';
-      badge.className = 'airtable-badge connected';
-    } else {
-      badge.textContent = 'In-Memory Only';
-      badge.className = 'airtable-badge disconnected';
-    }
-  } catch (err) {}
-}
-
-// ── RENDER STATS ──
 function renderStats() {
-  const grid = document.getElementById('stats-grid');
-  const cards = [
-    { label: 'Total', value: allStats.totalProspects, cls: 'total' },
-    { label: 'Pending', value: allStats.pending, cls: 'pending' },
-    { label: 'Called', value: allStats.called, cls: 'called' },
-    { label: 'Interested', value: allStats.interested, cls: 'interested' },
-    { label: 'Demos Sent', value: allStats.demosSent, cls: 'demos' },
-    { label: 'Booked', value: allStats.demosBooked, cls: 'booked' },
-    { label: 'Not Interested', value: allStats.notInterested, cls: 'rejected' },
-    { label: 'Voicemails', value: allStats.voicemails, cls: 'voicemail' },
+  const total = prospects.length;
+  const uncalled = prospects.filter(p => !p.called && p.phone).length;
+  const called = prospects.filter(p => p.called).length;
+  const noPhone = prospects.filter(p => !p.phone).length;
+  const results = {};
+  prospects.forEach(p => {
+    const r = (p.result || "pending").toLowerCase();
+    results[r] = (results[r] || 0) + 1;
+  });
+
+  const stats = [
+    { label: "Total", value: total, color: "#e2e8f0" },
+    { label: "Uncalled", value: uncalled, color: "#fbbf24" },
+    { label: "Called", value: called, color: "#a78bfa" },
+    { label: "Interested", value: results["interested"] || 0, color: "#38bdf8" },
+    { label: "Demos Sent", value: results["demo video sent"] || 0, color: "#34d399" },
+    { label: "Voicemails", value: results["voicemail"] || 0, color: "#fb923c" },
+    { label: "No Phone", value: noPhone, color: "#64748b" },
   ];
-  grid.innerHTML = cards.map(c => `
-    <div class="stat-card ${c.cls}">
-      <div class="stat-label">${c.label}</div>
-      <div class="stat-value">${c.value || 0}</div>
-    </div>
-  `).join('');
+
+  document.getElementById("statsRow").innerHTML = stats.map(s =>
+    '<div class="stat"><div class="stat-val" style="color:' + s.color + '">' + s.value + '</div><div class="stat-label">' + s.label + '</div></div>'
+  ).join("");
+
+  document.getElementById("btnRun").textContent = "📞 Call All (" + uncalled + ")";
+  document.getElementById("btnRun").disabled = uncalled === 0;
+  document.getElementById("tabProspects").textContent = "Prospects (" + total + ")";
+  document.getElementById("tabCalllog").textContent = "Call Log (" + callLog.length + ")";
 }
 
-// ── RENDER PROSPECTS ──
 function renderProspects() {
-  const tbody = document.getElementById('prospects-body');
-  tbody.innerHTML = allProspects.map(p => `
-    <tr>
-      <td style="color:var(--text-muted); font-family:var(--mono); font-size:12px;">${p.id}</td>
-      <td style="font-weight:600;">${esc(p.name)}</td>
-      <td>${esc(p.business)}</td>
-      <td class="phone-col">${p.phone ? formatPhone(p.phone) : '<span class="no-phone">No phone</span>'}</td>
-      <td><span class="status-badge status-${p.status}">${p.status.replace(/_/g, ' ')}</span></td>
-      <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-dim); font-size:12px;" title="${esc(p.notes)}">${esc(p.notes)}</td>
-      <td>
-        <div class="actions-cell">
-          ${p.phone && p.status === 'pending' ? `<button class="btn-sm btn-call" onclick="callProspect(${p.id})">&#9742; Call</button>` : ''}
-          <button class="btn-sm btn-edit" onclick="openEditModal(${p.id})">Edit</button>
-          ${p.called ? `<button class="btn-sm btn-reset" onclick="resetProspect(${p.id})">Reset</button>` : ''}
-          <button class="btn-sm btn-delete" onclick="deleteProspect(${p.id})">Del</button>
-        </div>
-      </td>
-    </tr>
-  `).join('');
-}
-
-// ── RENDER CALL LOG ──
-function renderCallLog(log) {
-  const container = document.getElementById('call-log-container');
-  if (!log || log.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="icon">&#128222;</div><p>No calls made yet. Start calling prospects!</p></div>';
+  const el = document.getElementById("content");
+  if (!prospects.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div>No prospects loaded</div></div>';
     return;
   }
-  container.innerHTML = log.slice().reverse().map(entry => {
-    const icons = { demo_sent: '&#128249;', demo_booked: '&#128197;', call_result: '&#128222;' };
-    const time = new Date(entry.timestamp).toLocaleString();
-    return `
-      <div class="log-entry">
-        <div class="log-icon ${entry.type}">${icons[entry.type] || '&#128222;'}</div>
-        <div class="log-details">
-          <div class="log-business">${esc(entry.business || 'Unknown')}</div>
-          <div class="log-meta">${entry.type.replace(/_/g, ' ')}${entry.outcome ? ' — ' + entry.outcome.replace(/_/g, ' ') : ''}${entry.notes ? ' — ' + esc(entry.notes) : ''}</div>
-        </div>
-        <div class="log-time">${time}</div>
-      </div>
-    `;
-  }).join('');
+  el.innerHTML = prospects.map((p, i) => {
+    const st = getStatus(p.result || (p.called ? "unknown" : "pending"));
+    const hasPhone = !!p.phone;
+    const isCalling = calling === p.phone;
+    return '<div class="row">' +
+      '<div class="row-icon" style="background:' + st.bg + ';color:' + st.color + '">' + st.icon + '</div>' +
+      '<div class="row-info">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<span class="row-biz">' + (p.business || p.name) + '</span>' +
+          '<span class="badge" style="background:' + st.bg + ';color:' + st.color + '">' + (statusColors[(p.result||"pending").toLowerCase()]||statusColors.pending).icon + ' ' + (p.result || "Pending") + '</span>' +
+        '</div>' +
+        '<div class="row-meta">' +
+          '<span>' + p.name + '</span>' +
+          (hasPhone ? '<span class="mono" style="font-size:10px">' + p.phone + '</span>' : '<span style="font-style:italic;color:#4a5568">No phone</span>') +
+        '</div>' +
+      '</div>' +
+      (hasPhone && !p.called ? '<button class="btn-call" onclick="callOne(\'' + p.phone + '\',\'' + p.name.replace(/'/g,"\\'") + '\',\'' + (p.business||"").replace(/'/g,"\\'") + '\')"' + (isCalling ? ' disabled' : '') + '>' + (isCalling ? 'Dialing...' : '📞 Call') + '</button>' : '') +
+      (p.called ? '<span class="mono" style="font-size:10px;color:#4a5568">' + (p.calledAt ? new Date(p.calledAt).toLocaleDateString() : 'called') + '</span>' : '') +
+    '</div>';
+  }).join("");
 }
 
-// ── ACTIONS ──
-async function callProspect(id) {
-  if (!confirm('Call this prospect now?')) return;
-  showToast('Initiating call...', 'info');
+function renderCallLog() {
+  const el = document.getElementById("content");
+  if (!callLog.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div>No calls logged yet</div></div>';
+    return;
+  }
+  el.innerHTML = callLog.map(log => {
+    const st = getStatus(log.outcome);
+    return '<div class="row">' +
+      '<div class="row-icon" style="background:' + st.bg + ';color:' + st.color + '">' + st.icon + '</div>' +
+      '<div class="row-info">' +
+        '<div class="row-biz">' + (log.business || "Unknown") + '</div>' +
+        '<div class="row-meta">' +
+          '<span class="badge" style="background:' + st.bg + ';color:' + st.color + '">' + (log.outcome || "unknown") + '</span>' +
+          '<span class="mono" style="font-size:10px">' + (log.phone || "") + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<span class="mono" style="font-size:10px;color:#4a5568;white-space:nowrap">' +
+        (log.timestamp ? new Date(log.timestamp).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "") +
+      '</span>' +
+    '</div>';
+  }).join("");
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById("tabProspects").className = tab === "prospects" ? "tab active" : "tab";
+  document.getElementById("tabCalllog").className = tab === "calllog" ? "tab active" : "tab";
+  render();
+}
+
+function render() {
+  renderStats();
+  if (currentTab === "prospects") renderProspects();
+  else renderCallLog();
+}
+
+async function callOne(phone, name, business) {
+  calling = phone;
+  render();
   try {
-    const res = await fetch(`${API}/api/call/${id}`, { method: 'POST' });
+    const res = await fetch(API + "/call", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone, name, business }),
+    });
     const data = await res.json();
-    if (data.success) {
-      showToast('Call initiated!', 'success');
-    } else {
-      showToast(data.error || 'Call failed', 'error');
-    }
-    setTimeout(loadData, 2000);
-  } catch (err) { showToast('Call failed: ' + err.message, 'error'); }
+    if (data.success || data.callId) showToast("Calling " + name + " at " + business + "...");
+    else showToast(data.error || "Call failed", "error");
+  } catch(e) {
+    showToast("Call failed: " + e.message, "error");
+  }
+  setTimeout(() => { calling = null; render(); }, 3000);
 }
 
-async function callAllPending() {
-  const pending = allProspects.filter(p => !p.called && p.phone && p.status === 'pending');
-  if (pending.length === 0) return showToast('No pending prospects with phone numbers', 'info');
-  if (!confirm(`Call ${pending.length} prospects (60s delay between each)?`)) return;
+document.getElementById("btnRun").onclick = async function() {
+  this.disabled = true;
+  this.textContent = "⏳ Running...";
   try {
-    const res = await fetch(`${API}/api/call-batch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delayBetweenCalls: 60 }) });
+    const res = await fetch(API + "/run", { method: "POST" });
     const data = await res.json();
-    showToast(data.message, 'success');
-    setTimeout(loadData, 3000);
-  } catch (err) { showToast('Batch call failed', 'error'); }
+    showToast(data.message || "Batch started");
+  } catch(e) {
+    showToast("Batch failed: " + e.message, "error");
+  }
+  setTimeout(() => refresh(), 5000);
+};
+
+async function refresh() {
+  await fetchProspects();
+  await fetchCallLog();
+  render();
+  showToast("Refreshed");
 }
 
-async function resetProspect(id) {
-  if (!confirm('Reset this prospect to pending?')) return;
-  try {
-    await fetch(`${API}/api/reset-prospect/${id}`, { method: 'POST' });
-    showToast('Prospect reset', 'success');
-    loadData();
-  } catch (err) { showToast('Reset failed', 'error'); }
-}
-
-async function deleteProspect(id) {
-  if (!confirm('Delete this prospect permanently?')) return;
-  try {
-    await fetch(`${API}/api/prospects/${id}`, { method: 'DELETE' });
-    showToast('Prospect deleted', 'success');
-    loadData();
-  } catch (err) { showToast('Delete failed', 'error'); }
-}
-
-// ── MODAL ──
-function openAddModal() {
-  document.getElementById('modal-title').textContent = 'Add Prospect';
-  document.getElementById('f-name').value = '';
-  document.getElementById('f-business').value = '';
-  document.getElementById('f-phone').value = '';
-  document.getElementById('f-notes').value = '';
-  document.getElementById('f-id').value = '';
-  document.getElementById('modal-overlay').classList.add('active');
-}
-
-function openEditModal(id) {
-  const p = allProspects.find(x => x.id === id);
-  if (!p) return;
-  document.getElementById('modal-title').textContent = 'Edit Prospect';
-  document.getElementById('f-name').value = p.name;
-  document.getElementById('f-business').value = p.business;
-  document.getElementById('f-phone').value = p.phone;
-  document.getElementById('f-notes').value = p.notes;
-  document.getElementById('f-id').value = p.id;
-  document.getElementById('modal-overlay').classList.add('active');
-}
-
-function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('active');
-}
-
-async function saveProspect() {
-  const id = document.getElementById('f-id').value;
-  const body = {
-    name: document.getElementById('f-name').value || 'Owner',
-    business: document.getElementById('f-business').value,
-    phone: document.getElementById('f-phone').value,
-    notes: document.getElementById('f-notes').value,
-  };
-  if (!body.business) return showToast('Business name required', 'error');
-
-  try {
-    if (id) {
-      await fetch(`${API}/api/prospects/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      showToast('Prospect updated', 'success');
-    } else {
-      await fetch(`${API}/api/prospects`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      showToast('Prospect added', 'success');
-    }
-    closeModal();
-    loadData();
-  } catch (err) { showToast('Save failed', 'error'); }
-}
-
-// ── TABS ──
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    const target = tab.dataset.tab;
-    document.getElementById('prospects-tab').style.display = target === 'prospects' ? 'block' : 'none';
-    document.getElementById('log-tab').style.display = target === 'log' ? 'block' : 'none';
-    document.getElementById('action-bar').style.display = target === 'prospects' ? 'flex' : 'none';
-  });
-});
-
-// ── HELPERS ──
-function formatPhone(phone) {
-  if (!phone) return '';
-  const d = phone.replace(/\D/g, '');
-  if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
-  return phone;
-}
-function esc(str) { if (!str) return ''; const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
-
-function showToast(msg, type = 'info') {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = `toast ${type} show`;
-  setTimeout(() => { t.classList.remove('show'); }, 3000);
-}
-
-// Close modal on overlay click
-document.getElementById('modal-overlay').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('modal-overlay')) closeModal();
-});
-
-// ── INIT ──
-loadData();
-setInterval(loadData, 30000); // auto-refresh every 30s
+// Initial load + auto-refresh
+(async () => {
+  await fetchProspects();
+  await fetchCallLog();
+  render();
+  setInterval(async () => {
+    await fetchProspects();
+    await fetchCallLog();
+    render();
+  }, 8000);
+})();
 </script>
 </body>
 </html>
