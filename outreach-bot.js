@@ -5,6 +5,7 @@
 
 import express from "express";
 import twilio from "twilio";
+import { readFileSync } from "fs";
 
 const app = express();
 app.use(express.json());
@@ -360,6 +361,13 @@ app.get("/call-log", async (req, res) => {
     console.error("GET /call-log error:", err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Dashboard ───────────────────────────────────────────────
+
+app.get("/dashboard", (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(readFileSync("./dashboard.html", "utf-8"));
 });
 
 // ── Start server ────────────────────────────────────────────
