@@ -370,6 +370,98 @@ app.get("/dashboard", (req, res) => {
   res.send(readFileSync("./dashboard.html", "utf-8"));
 });
 
+// ── Prospect Management ─────────────────────────────────────
+
+app.post("/prospects", async (req, res) => {
+  try {
+    const { name, business, phone, notes } = req.body;
+    if (!business) return res.status(400).json({ error: "business is required" });
+    
+    // Duplicate check by phone number
+    if (phone) {
+      const checkParams = new URLSearchParams({
+        filterByFormula: "{Phone} = \"" + phone + "\"",
+        maxRecords: "1",
+      });
+      const existing = await atFetch("Prospects?" + checkParams.toString());
+      if (existing.records && existing.records.length > 0) {
+        return res.json({ success: false, duplicate: true, existing: existing.records[0].fields });
+      }
+    }
+    
+    const result = await atFetch("Prospects", {
+      method: "POST",
+      body: JSON.stringify({
+        records: [{
+          fields: {
+            Name: name || "Owner",
+            Business: business,
+            Phone: phone || "",
+            Notes: notes || "",
+            Called: false,
+          },
+        }],
+      }),
+    });
+    res.json({ success: true, record: result.records ? result.records[0] : null });
+  } catch (err) {
+    console.error("POST /prospects error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/prospects/bulk", async (req, res) => {
+  try {
+    const { prospects: items } = req.body;
+    if (!items || !items.length) return res.status(400).json({ error: "No prospects provided" });
+    
+    // Get all existing phone numbers for dedup
+    const existingParams = new URLSearchParams({ pageSize: "100", fields: ["Phone"] });
+    let existingPhones = new Set();
+    let offset;
+    do {
+      if (offset) existingParams.set("offset", offset);
+      const data = await atFetch("Prospects?" + existingParams.toString());
+      (data.records || []).forEach(r => {
+        if (r.fields.Phone) existingPhones.add(r.fields.Phone);
+      });
+      offset = data.offset;
+    } while (offset);
+    
+    const newItems = items.filter(i => !i.phone || !existingPhones.has(i.phone));
+    const dupes = items.length - newItems.length;
+    
+    if (newItems.length === 0) {
+      return res.json({ success: true, added: 0, duplicates: dupes, message: "All prospects already exist" });
+    }
+    
+    // Airtable allows max 10 records per request
+    let added = 0;
+    for (let i = 0; i < newItems.length; i += 10) {
+      const batch = newItems.slice(i, i + 10);
+      const records = batch.map(p => ({
+        fields: {
+          Name: p.name || "Owner",
+          Business: p.business || "",
+          Phone: p.phone || "",
+          Notes: p.notes || "",
+          Called: false,
+        },
+      }));
+      await atFetch("Prospects", {
+        method: "POST",
+        body: JSON.stringify({ records }),
+      });
+      added += batch.length;
+    }
+    
+    res.json({ success: true, added, duplicates: dupes });
+  } catch (err) {
+    console.error("POST /prospects/bulk error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start server ────────────────────────────────────────────
 
 app.listen(PORT, () => {
