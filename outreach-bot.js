@@ -1,336 +1,459 @@
 import express from "express";
-import twilio from "twilio";
-import { readFileSync } from "fs";
+import fetch from "node-fetch";
+import Airtable from "airtable";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json());
+app.use(express.static(__dirname));
 
+// ─── ENV ────────────────────────────────────────────────────────────────────
 const {
-  VAPI_API_KEY,
-  VAPI_PHONE_NUMBER_ID,
-  TWILIO_ACCOUNT_SID,
-  TWILIO_AUTH_TOKEN,
-  TWILIO_PHONE,
-  CALENDLY_LINK,
-  DEMO_VIDEO_URL,
   AIRTABLE_API_KEY,
   AIRTABLE_BASE_ID,
-  GOOGLE_PLACES_API_KEY,
-  PORT = 3001,
+  VAPI_API_KEY,
+  VAPI_PHONE_NUMBER_ID,
+  VAPI_ASSISTANT_ID,
+  TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN,
+  TWILIO_FROM_NUMBER,
+  DEMO_VIDEO_URL,
+  CALENDLY_URL,
+  PORT = 3000,
 } = process.env;
 
-const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+// ─── AIRTABLE ────────────────────────────────────────────────────────────────
+const base = new Airtable({ apiKey: AIRTABLE_API_KEY }).base(AIRTABLE_BASE_ID);
+const ProspectsTable = base("Prospects");
+const CallLogTable   = base("CallLog");
 
-// ── Live call progress tracker ──────────────────────────────
-var callProgress = {
-  running: false,
-  total: 0,
-  completed: 0,
-  current: null,
-  results: [],
-  startedAt: null,
-};
+// ─── PRIORITY LOGIC ──────────────────────────────────────────────────────────
+/**
+ * Derive a prospect's priority tier from their LastOutcome.
+ *
+ * HOT   – answered, got the demo, hasn't booked  → needs Andrew follow-up
+ * WARM  – answered but asked for callback
+ * NEW   – never called
+ * RETRY – no answer / voicemail / busy / timed out
+ * COLD  – explicitly not interested
+ */
+function getPriorityTier(lastOutcome, callCount) {
+  if (!lastOutcome || callCount === 0) return "NEW";
 
-// ── Airtable helpers ────────────────────────────────────────
+  const o = (lastOutcome || "").toLowerCase();
 
-const atFetch = (path, opts = {}) => {
-  const qIdx = path.indexOf("?");
-  const table = qIdx === -1 ? path : path.slice(0, qIdx);
-  const query = qIdx === -1 ? "" : path.slice(qIdx);
-  const url = "https://api.airtable.com/v0/" + AIRTABLE_BASE_ID + "/" + encodeURIComponent(table) + query;
-  return fetch(url, {
-    ...opts,
-    headers: {
-      Authorization: "Bearer " + AIRTABLE_API_KEY,
-      "Content-Type": "application/json",
-      ...(opts.headers || {}),
-    },
-  }).then((r) => r.json());
-};
+  if (
+    o.includes("demo-sent") ||
+    o.includes("demo sent") ||
+    o.includes("interested") ||
+    o.includes("got demo")
+  ) return "HOT";
 
-async function getProspects() {
-  const params = new URLSearchParams({
-    filterByFormula: 'AND(NOT({Called}), {Phone} != "")',
-    maxRecords: "100",
+  if (
+    o.includes("call-back") ||
+    o.includes("callback") ||
+    o.includes("call back") ||
+    o.includes("call me later") ||
+    o.includes("later")
+  ) return "WARM";
+
+  if (
+    o.includes("not-interested") ||
+    o.includes("not interested") ||
+    o.includes("no thanks") ||
+    o.includes("remove")
+  ) return "COLD";
+
+  // voicemail / no-answer / silence / busy → RETRY
+  if (
+    o.includes("voicemail") ||
+    o.includes("no-answer") ||
+    o.includes("no answer") ||
+    o.includes("silence") ||
+    o.includes("busy") ||
+    o.includes("customer-busy") ||
+    o.includes("timed-out") ||
+    o.includes("timeout")
+  ) return "RETRY";
+
+  return "NEW";
+}
+
+const PRIORITY_ORDER = { HOT: 0, WARM: 1, NEW: 2, RETRY: 3, COLD: 4 };
+
+function sortProspects(prospects) {
+  return prospects.sort((a, b) => {
+    const pa = PRIORITY_ORDER[a.fields.PriorityTier || "NEW"] ?? 99;
+    const pb = PRIORITY_ORDER[b.fields.PriorityTier || "NEW"] ?? 99;
+    return pa - pb;
   });
-  const data = await atFetch("Prospects?" + params.toString());
-  return (data.records || []).map((r) => ({
-    id: r.id,
-    name: r.fields["Name"] || "Owner",
-    business: r.fields["Business"] || "",
-    phone: r.fields["Phone"] || "",
-  }));
 }
 
-async function getAllExistingPhones() {
-  const params = new URLSearchParams({ pageSize: "100" });
-  var phones = new Set();
-  var offset;
-  do {
-    if (offset) params.set("offset", offset);
-    var data = await atFetch("Prospects?" + params.toString());
-    (data.records || []).forEach(function(r) {
-      if (r.fields.Phone) phones.add(r.fields.Phone);
-    });
-    offset = data.offset;
-  } while (offset);
-  return phones;
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+async function updateProspectCallStats(airtableId, outcome) {
+  // Fetch current record
+  const record = await ProspectsTable.find(airtableId);
+  const currentCount = record.fields.CallCount || 0;
+  const newCount = currentCount + 1;
+  const tier = getPriorityTier(outcome, newCount);
+
+  await ProspectsTable.update(airtableId, {
+    CallCount:    newCount,
+    LastOutcome:  outcome,
+    PriorityTier: tier,
+    LastCalledAt: new Date().toISOString(),
+  });
+
+  return { newCount, tier };
 }
 
-async function markCalled(recordId, result) {
-  await atFetch("Prospects/" + recordId, {
-    method: "PATCH",
-    body: JSON.stringify({
-      fields: { Called: true, Result: result, CalledAt: new Date().toISOString() },
-    }),
+async function logCall(airtableId, prospectName, phone, outcome, callId, attemptNumber) {
+  await CallLogTable.create({
+    ProspectId:     airtableId,
+    ProspectName:   prospectName,
+    Phone:          phone,
+    Outcome:        outcome,
+    CallId:         callId || "",
+    AttemptNumber:  attemptNumber,
+    CalledAt:       new Date().toISOString(),
   });
 }
 
-async function logCall({ type, outcome, business, phone }) {
-  await atFetch("CallLog", {
+async function sendSMS(to, body) {
+  if (!TWILIO_ACCOUNT_SID) return;
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+  const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
+  await fetch(url, {
     method: "POST",
-    body: JSON.stringify({
-      records: [{ fields: { Type: type, Outcome: outcome, Business: business, Phone: phone, Timestamp: new Date().toISOString() } }],
-    }),
+    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ To: to, From: TWILIO_FROM_NUMBER, Body: body }),
   });
 }
 
-// ── Mike system prompt ──────────────────────────────────────
-
-function buildSystemPrompt(p) {
-  return "You are Mike, an outreach assistant for AQ Solutions — a company that helps plumbing and HVAC businesses in New Jersey recover lost revenue from missed calls using AI-powered call answering.\n\nYou are calling " + p.name + " at " + p.business + ".\n\n## YOUR PERSONALITY\n- You are warm, casual, and confident — like a real person from Jersey, not a robot\n- Use natural verbal fillers occasionally: so, honestly, like, yeah, look\n- Keep your sentences short. Never ramble.\n- You are NOT pushy. One soft close, then respect their answer.\n- Never say as an AI or anything that sounds scripted or robotic\n- If they ask if you are a robot or AI, be honest but pivot: Yeah, I am an AI assistant — but the system I am calling about is really for your business. Can I take 30 more seconds?\n- Total call time goal: under 3 minutes\n\n## CALL FLOW\n\n### STEP 1 — OPENING (do not skip)\nSay exactly this first message, then stop and listen:\nHi, is this " + p.name + "? Hey — this is Mike calling from AQ Solutions. Super quick — do you have like 30 seconds?\n\nIf they say yes or seem open, go to Step 2.\nIf they say no or seem annoyed, say No worries at all, I will let you go. Have a good one! and end the call.\n\n### STEP 2 — QUALIFYING QUESTION\nAsk ONE of these, pick naturally based on flow:\n- So quick question — when you are on a job or it is after hours, what happens to your missed calls? Do they just go to voicemail?\n- Do you ever lose jobs because someone called while you were busy and ended up calling the next guy?\n\nListen to their answer. Acknowledge it before pitching.\n\n### STEP 3 — THE PITCH (keep it to 3-4 sentences max)\nSo what AQ Solutions does is — we set up an AI that answers every call you miss, 24/7. It talks to the customer, gets their info, tells them you will call back, and logs everything. So you never lose a lead just because you were on a job. A lot of guys in Jersey are using it now.\n\n### STEP 4 — CLOSE\nOffer ONE of the following based on their vibe:\n\nIf they seem curious or positive:\nI can shoot you a 2-minute demo video right now — no signup, nothing. You just watch it and see if it makes sense for your business. Want me to text it to you?\n\nIf they seem more serious or analytical:\nWould it make sense to grab 15 minutes on a call? I can show you exactly how it works and what it would cost. I can text you a link to pick a time.\n\nAlways try to send the demo video first — it is the lower-friction ask.\n\n### STEP 5 — IF THEY AGREE TO VIDEO OR BOOKING\nSay: Perfect — what is the best number to text you at? if different from what you called.\nThen call the send_demo_video or book_demo_call tool immediately.\nConfirm: Sent! Check your texts. And hey — no pressure at all, just watch it when you get a chance.\nThen wrap up: Alright, I will let you go. Thanks for your time, " + p.name + ". Have a good one!\n\n## OBJECTION HANDLERS\n\nNot interested or Dont need it\nSay: Totally get it — honestly most guys say that until they lose a big job to a missed call. I am not here to sell you anything today, just wanted to see if it made sense. No worries at all.\nThen try one last soft offer: I can still shoot you the video just so you have it — no pressure.\nIf they say no again, end the call gracefully.\n\nHow much does it cost?\nSay: So it depends on your call volume — it is typically way less than losing one job. The demo video actually covers the pricing. Want me to shoot that over?\n\nIs this a robot? or Are you AI?\nSay: Yeah, I am an AI assistant — but honestly, what I am calling about is for your business, not mine. Can I take 30 more seconds to explain?\n\nI already have something like that or I use a competitor\nSay: Oh nice — yeah there are a few out there. A lot of guys still switch over once they see how AQ Solutions handles the actual conversation, not just voicemail. But hey, if it is working for you, that is what matters.\n\nCall me back later or Not a good time\nSay: Of course — I will get out of your hair. Is there a better time, or should I just try again tomorrow?\nIf they give a time, say: Got it, I will make a note. Thanks " + p.name + "! and end the call.\nIf vague, say: No problem at all, take care! and end the call.\n\nHow did you get my number?\nSay: Your business info is listed publicly — we just reach out to local contractors in Jersey. Nothing weird, I promise.\n\n## VOICEMAIL SCRIPT\nIf you reach voicemail, leave this message and hang up:\nHey, this is Mike calling from AQ Solutions — we help plumbing and HVAC businesses in Jersey stop losing jobs to missed calls. I will shoot you a quick text with a short demo video. No obligation, just take a look when you get a chance. Have a good one!\nThen immediately call the log_call_result tool with outcome voicemail.\n\n## TOOLS — WHEN TO CALL THEM\n- send_demo_video: call this when the prospect agrees to receive the video\n- book_demo_call: call this when the prospect wants to schedule a call\n- log_call_result: ALWAYS call this at the very end of every call, no exceptions\n\n## RULES\n- Never make up pricing numbers\n- Never promise specific results or guarantees\n- Never be rude or argue, even if they are dismissive\n- If they hang up, do not call back\n- Keep the total call under 3 minutes\n- Always end on a positive, friendly note";
-}
-
-function buildAssistant(prospect) {
-  return {
-    name: "Mike",
-    model: {
-      provider: "openai", model: "gpt-4o",
-      messages: [{ role: "system", content: buildSystemPrompt(prospect) }],
-      tools: [
-        { type: "function", function: { name: "send_demo_video", description: "Send the prospect a text message with the AQ Solutions demo video link.", parameters: { type: "object", properties: { name: { type: "string", description: "The prospect first name" } }, required: ["name"] } } },
-        { type: "function", function: { name: "book_demo_call", description: "Send the Calendly booking link via SMS.", parameters: { type: "object", properties: { name: { type: "string", description: "The prospect first name" } }, required: ["name"] } } },
-        { type: "function", function: { name: "log_call_result", description: "Log the final outcome of the call. MUST be called at the end of every call.", parameters: { type: "object", properties: { outcome: { type: "string", enum: ["interested", "not interested", "voicemail", "no answer", "callback requested", "demo video sent", "booking link sent"], description: "The result of the call" }, notes: { type: "string", description: "Any relevant notes" } }, required: ["outcome"] } } },
-      ],
-    },
-    voice: { provider: "11labs", voiceId: "eN7WPylhvgvOGdskN6bn" },
-    firstMessage: "Hi, is this " + prospect.name + "? Hey — this is Mike calling from AQ Solutions. Super quick — do you have like 30 seconds?",
-  };
-}
-
-async function createVapiCall(prospect) {
+async function makeVapiCall(phone, prospectName, airtableId) {
   const res = await fetch("https://api.vapi.ai/call/phone", {
     method: "POST",
-    headers: { Authorization: "Bearer " + VAPI_API_KEY, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${VAPI_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       phoneNumberId: VAPI_PHONE_NUMBER_ID,
-      customer: { number: prospect.phone },
-      assistant: buildAssistant(prospect),
-      metadata: { airtableId: prospect.id, business: prospect.business, name: prospect.name, phone: prospect.phone },
+      assistantId:   VAPI_ASSISTANT_ID,
+      customer: { number: phone, name: prospectName },
+      assistantOverrides: {
+        variableValues: { prospectName, airtableId },
+      },
     }),
   });
   return res.json();
 }
 
-// ── Routes ──────────────────────────────────────────────────
+// ─── ROUTES ──────────────────────────────────────────────────────────────────
 
-app.get("/", function(req, res) { res.json({ status: "AQ Outreach Bot running", ts: new Date().toISOString() }); });
-app.get("/dashboard", function(req, res) { res.setHeader("Content-Type", "text/html"); res.send(readFileSync("./dashboard.html", "utf-8")); });
-
-app.post("/call", async function(req, res) {
-  try {
-    var phone = req.body.phone, name = req.body.name || "Owner", business = req.body.business || "your business";
-    if (!phone) return res.status(400).json({ error: "phone is required" });
-    var result = await createVapiCall({ id: null, phone: phone, name: name, business: business });
-    res.json({ success: true, callId: result.id, result: result });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+// Dashboard
+app.get("/dashboard", (req, res) => {
+  res.sendFile(path.join(__dirname, "dashboard.html"));
 });
 
-app.post("/run", async function(req, res) {
+// ── GET /api/prospects ───────────────────────────────────────────────────────
+app.get("/api/prospects", async (req, res) => {
   try {
-    var p = await getProspects();
-    if (!p.length) return res.json({ message: "No uncalled prospects with phone numbers." });
+    const records = await ProspectsTable.select({
+      maxRecords: 500,
+      fields: [
+        "Name", "Phone", "BusinessName", "Email", "City", "Status",
+        "CallCount", "LastOutcome", "LastCalledAt", "PriorityTier",
+        "Notes",
+      ],
+    }).all();
 
-    // Initialize progress
-    callProgress.running = true;
-    callProgress.total = p.length;
-    callProgress.completed = 0;
-    callProgress.current = null;
-    callProgress.results = [];
-    callProgress.startedAt = new Date().toISOString();
+    // Recalculate PriorityTier on read for any records missing it
+    const prospects = records.map((r) => {
+      const callCount   = r.fields.CallCount || 0;
+      const lastOutcome = r.fields.LastOutcome || "";
+      const tier        = r.fields.PriorityTier || getPriorityTier(lastOutcome, callCount);
+      return {
+        id:     r.id,
+        fields: { ...r.fields, CallCount: callCount, PriorityTier: tier },
+      };
+    });
 
-    res.json({ message: "Run started", total: p.length });
-
-    for (var i = 0; i < p.length; i++) {
-      callProgress.current = { index: i + 1, name: p[i].name, business: p[i].business, phone: p[i].phone, status: "dialing" };
-      try {
-        var call = await createVapiCall(p[i]);
-        console.log("Called " + p[i].name + " at " + p[i].business + " — callId: " + call.id);
-        callProgress.current.status = "in-call";
-        callProgress.current.callId = call.id;
-        callProgress.results.push({ name: p[i].name, business: p[i].business, phone: p[i].phone, status: "called", callId: call.id });
-      } catch (err) {
-        console.error("Failed to call " + p[i].name + ": " + err.message);
-        callProgress.results.push({ name: p[i].name, business: p[i].business, phone: p[i].phone, status: "failed", error: err.message });
-      }
-      callProgress.completed = i + 1;
-
-      if (i < p.length - 1) {
-        callProgress.current = { index: i + 1, name: p[i].name, business: p[i].business, status: "waiting", nextIn: 90 };
-        // Countdown the wait
-        for (var s = 90; s > 0; s--) {
-          callProgress.current.nextIn = s;
-          await new Promise(function(r) { setTimeout(r, 1000); });
-        }
-      }
-    }
-
-    callProgress.running = false;
-    callProgress.current = null;
+    res.json({ prospects: sortProspects(prospects) });
   } catch (err) {
-    console.error("Run error:", err);
-    callProgress.running = false;
-    callProgress.current = null;
+    console.error("GET /api/prospects error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Call Progress endpoint ──────────────────────────────────
-app.get("/progress", function(req, res) {
-  res.json(callProgress);
+// ── POST /api/prospects (add single) ────────────────────────────────────────
+app.post("/api/prospects", async (req, res) => {
+  try {
+    const { name, phone, businessName, email, city } = req.body;
+    const record = await ProspectsTable.create({
+      Name:         name,
+      Phone:        phone,
+      BusinessName: businessName || "",
+      Email:        email || "",
+      City:         city || "",
+      Status:       "pending",
+      CallCount:    0,
+      PriorityTier: "NEW",
+    });
+    res.json({ success: true, id: record.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post("/vapi/outreach-webhook", async function(req, res) {
-  var message = req.body.message;
-  if (!message) return res.sendStatus(200);
+// ── POST /api/prospects/bulk ─────────────────────────────────────────────────
+app.post("/api/prospects/bulk", async (req, res) => {
+  try {
+    const { prospects } = req.body; // array of { name, phone, businessName, city }
+    const chunks = [];
+    for (let i = 0; i < prospects.length; i += 10) chunks.push(prospects.slice(i, i + 10));
 
-  if (message.type === "tool-calls") {
-    var toolCallList = message.toolCallList || [];
-    var callPhone = message.call && message.call.customer ? message.call.customer.number : "";
-    var results = [];
-    for (var i = 0; i < toolCallList.length; i++) {
-      var tc = toolCallList[i];
-      var tname = tc.name || (tc.function ? tc.function.name : "");
-      var params = tc.parameters || (tc.function ? tc.function.parameters : {}) || {};
-      var id = tc.id;
-      if (tname === "send_demo_video") {
-        try { await twilioClient.messages.create({ body: "Hey " + (params.name || "there") + "! Here is a quick 2-min demo of AQ Solutions: " + DEMO_VIDEO_URL + " — No pressure, just take a look when you get a chance!", from: "+1" + TWILIO_PHONE, to: callPhone }); console.log("Demo video SMS sent to " + callPhone); results.push({ toolCallId: id, name: tname, result: "Demo video sent via SMS successfully." }); } catch (e) { results.push({ toolCallId: id, name: tname, result: "SMS failed: " + e.message }); }
-      } else if (tname === "book_demo_call") {
-        try { await twilioClient.messages.create({ body: "Hey " + (params.name || "there") + "! Here is the link to book your free 15-min AQ Solutions demo: " + CALENDLY_LINK, from: "+1" + TWILIO_PHONE, to: callPhone }); console.log("Calendly SMS sent to " + callPhone); results.push({ toolCallId: id, name: tname, result: "Calendly booking link sent via SMS successfully." }); } catch (e) { results.push({ toolCallId: id, name: tname, result: "SMS failed: " + e.message }); }
-      } else if (tname === "log_call_result") {
-        var outcome = params.outcome || "unknown"; console.log("Call outcome logged mid-call: " + outcome); results.push({ toolCallId: id, name: tname, result: "Outcome " + outcome + " noted." });
-        // Update progress with outcome
-        if (callProgress.current) callProgress.current.outcome = outcome;
-      } else { results.push({ toolCallId: id, name: tname, result: "Unknown tool" }); }
+    let created = 0;
+    for (const chunk of chunks) {
+      const records = chunk.map((p) => ({
+        fields: {
+          Name:         p.name || p.Name || "",
+          Phone:        p.phone || p.Phone || "",
+          BusinessName: p.businessName || p.BusinessName || "",
+          City:         p.city || p.City || "",
+          Status:       "pending",
+          CallCount:    0,
+          PriorityTier: "NEW",
+        },
+      }));
+      await ProspectsTable.create(records);
+      created += chunk.length;
     }
-    return res.json({ results: results });
+    res.json({ success: true, created });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
+});
 
-  if (message.type === "end-of-call-report") {
-    var call = message.call || {};
-    var meta = call.metadata || {};
-    var oc = message.endedReason || "unknown";
-    try {
-      if (meta.airtableId) await markCalled(meta.airtableId, oc);
-      await logCall({ type: "outbound", outcome: oc, business: meta.business || "", phone: meta.phone || (call.customer ? call.customer.number : "") || "" });
-      console.log("End-of-call logged — " + (meta.business || "unknown") + " — " + oc);
-      // Update progress result with final outcome
-      if (callProgress.results.length > 0) {
-        for (var j = callProgress.results.length - 1; j >= 0; j--) {
-          if (callProgress.results[j].phone === (meta.phone || "")) {
-            callProgress.results[j].outcome = oc;
-            break;
-          }
-        }
+// ── POST /api/call ───────────────────────────────────────────────────────────
+app.post("/api/call", async (req, res) => {
+  try {
+    const { airtableId, phone, name } = req.body;
+
+    // Mark as calling
+    await ProspectsTable.update(airtableId, { Status: "calling" });
+
+    const callRes = await makeVapiCall(phone, name, airtableId);
+    res.json({ success: true, callId: callRes.id });
+  } catch (err) {
+    console.error("POST /api/call error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/retry ──────────────────────────────────────────────────────────
+// Explicit retry for RETRY-tier prospects
+app.post("/api/retry", async (req, res) => {
+  try {
+    const { airtableId, phone, name } = req.body;
+
+    const record = await ProspectsTable.find(airtableId);
+    const tier   = record.fields.PriorityTier;
+
+    if (!["RETRY", "WARM", "NEW"].includes(tier)) {
+      return res.status(400).json({ error: `Cannot retry a ${tier} prospect from this endpoint.` });
+    }
+
+    await ProspectsTable.update(airtableId, { Status: "calling" });
+    const callRes = await makeVapiCall(phone, name, airtableId);
+    res.json({ success: true, callId: callRes.id, message: `Retry call initiated (attempt #${(record.fields.CallCount || 0) + 1})` });
+  } catch (err) {
+    console.error("POST /api/retry error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/call-all ───────────────────────────────────────────────────────
+app.post("/api/call-all", async (req, res) => {
+  try {
+    // Call NEW + RETRY prospects that aren't currently being called
+    const records = await ProspectsTable.select({
+      filterByFormula: `OR(
+        AND({Status} = 'pending', OR({PriorityTier} = 'NEW', {PriorityTier} = '')),
+        AND({Status} = 'pending', {PriorityTier} = 'RETRY')
+      )`,
+      maxRecords: 100,
+    }).all();
+
+    res.json({ success: true, queued: records.length, ids: records.map((r) => r.id) });
+
+    // Fire calls asynchronously with stagger
+    for (const record of records) {
+      const { Name, Phone } = record.fields;
+      if (!Phone) continue;
+      try {
+        await ProspectsTable.update(record.id, { Status: "calling" });
+        await makeVapiCall(Phone, Name, record.id);
+      } catch (e) {
+        console.error(`Call failed for ${Name}:`, e.message);
       }
-    } catch (err) { console.error("Airtable update error:", err.message); }
-    return res.sendStatus(200);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  } catch (err) {
+    console.error("POST /api/call-all error:", err);
+    res.status(500).json({ error: err.message });
   }
-  res.sendStatus(200);
 });
 
-// ── Dashboard API routes ────────────────────────────────────
-
-app.get("/prospects", async function(req, res) {
+// ── POST /api/places-search ──────────────────────────────────────────────────
+app.post("/api/places-search", async (req, res) => {
   try {
-    var params = new URLSearchParams({ pageSize: "100" });
-    var allRecords = [], offset;
-    do { if (offset) params.set("offset", offset); var data = await atFetch("Prospects?" + params.toString()); allRecords = allRecords.concat(data.records || []); offset = data.offset; } while (offset);
-    var prospects = allRecords.map(function(r) { return { id: r.id, name: r.fields["Name"] || "", business: r.fields["Business"] || "", phone: r.fields["Phone"] || "", called: r.fields["Called"] || false, result: r.fields["Result"] || "", calledAt: r.fields["CalledAt"] || null }; });
-    res.json({ total: prospects.length, prospects: prospects });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const { query, location } = req.body;
+    const PLACES_KEY = process.env.GOOGLE_PLACES_API_KEY;
+    if (!PLACES_KEY) return res.status(500).json({ error: "No Google Places API key configured" });
+
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&location=${encodeURIComponent(location)}&key=${PLACES_KEY}`;
+    const r   = await fetch(url);
+    const data = await r.json();
+
+    const results = (data.results || []).map((p) => ({
+      name:    p.name,
+      address: p.formatted_address,
+      phone:   p.formatted_phone_number || "",
+      placeId: p.place_id,
+    }));
+
+    res.json({ results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get("/call-log", async function(req, res) {
+// ── GET /api/call-history/:airtableId ───────────────────────────────────────
+app.get("/api/call-history/:airtableId", async (req, res) => {
   try {
-    var params = new URLSearchParams({ pageSize: "100", "sort[0][field]": "Timestamp", "sort[0][direction]": "desc" });
-    var allRecords = [], offset;
-    do { if (offset) params.set("offset", offset); var data = await atFetch("CallLog?" + params.toString()); allRecords = allRecords.concat(data.records || []); offset = data.offset; } while (offset);
-    var logs = allRecords.map(function(r) { return { id: r.id, type: r.fields["Type"] || "", outcome: r.fields["Outcome"] || "", business: r.fields["Business"] || "", phone: r.fields["Phone"] || "", timestamp: r.fields["Timestamp"] || null }; });
-    res.json({ total: logs.length, log: logs });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const { airtableId } = req.params;
+    const records = await CallLogTable.select({
+      filterByFormula: `{ProspectId} = '${airtableId}'`,
+      sort: [{ field: "CalledAt", direction: "desc" }],
+    }).all();
+
+    res.json({
+      history: records.map((r) => ({
+        id:            r.id,
+        outcome:       r.fields.Outcome,
+        attemptNumber: r.fields.AttemptNumber,
+        calledAt:      r.fields.CalledAt,
+        callId:        r.fields.CallId,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// ── Prospect Management ─────────────────────────────────────
-
-app.post("/prospects", async function(req, res) {
+// ── GET /api/hot-leads ───────────────────────────────────────────────────────
+app.get("/api/hot-leads", async (req, res) => {
   try {
-    var business = req.body.business, name = req.body.name, phone = req.body.phone, notes = req.body.notes;
-    if (!business) return res.status(400).json({ error: "business is required" });
-    if (phone) {
-      var checkParams = new URLSearchParams({ filterByFormula: '{Phone} = "' + phone + '"', maxRecords: "1" });
-      var existing = await atFetch("Prospects?" + checkParams.toString());
-      if (existing.records && existing.records.length > 0) return res.json({ success: false, duplicate: true, existing: existing.records[0].fields });
+    const records = await ProspectsTable.select({
+      filterByFormula: `{PriorityTier} = 'HOT'`,
+      maxRecords: 50,
+    }).all();
+    res.json({ hotLeads: records.map((r) => ({ id: r.id, fields: r.fields })) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /vapi-webhook ───────────────────────────────────────────────────────
+app.post("/vapi-webhook", async (req, res) => {
+  res.sendStatus(200); // Acknowledge immediately
+
+  try {
+    const payload = req.body;
+    const type    = payload?.message?.type;
+
+    // Only handle end-of-call reports
+    if (type !== "end-of-call-report") return;
+
+    const msg        = payload.message;
+    const callId     = msg.call?.id || "";
+    const airtableId = msg.call?.customer?.metadata?.airtableId
+                    || msg.assistantOverrides?.variableValues?.airtableId
+                    || msg.call?.assistantOverrides?.variableValues?.airtableId;
+
+    const phone   = msg.call?.customer?.number || "";
+    const summary = (msg.summary || "").toLowerCase();
+    const endedBy = msg.endedReason || "";
+
+    // ── Outcome classification ─────────────────────────────────────────────
+    let outcome = "unknown";
+
+    if (endedBy === "customer-did-not-pick-up" || endedBy === "no-answer") {
+      outcome = "no-answer";
+    } else if (endedBy === "voicemail") {
+      outcome = "voicemail";
+    } else if (endedBy === "silence-timed-out") {
+      outcome = "silence-timed-out";
+    } else if (endedBy === "customer-busy") {
+      outcome = "customer-busy";
+    } else if (
+      summary.includes("not interested") ||
+      summary.includes("do not call") ||
+      summary.includes("remove")
+    ) {
+      outcome = "not-interested";
+    } else if (
+      summary.includes("call back") ||
+      summary.includes("call me later") ||
+      summary.includes("callback")
+    ) {
+      outcome = "callback-requested";
+    } else if (
+      summary.includes("demo") ||
+      summary.includes("video") ||
+      summary.includes("interested") ||
+      summary.includes("sent")
+    ) {
+      outcome = "demo-sent";
+    } else if (endedBy === "assistant-ended-call") {
+      outcome = "completed";
     }
-    var result = await atFetch("Prospects", { method: "POST", body: JSON.stringify({ records: [{ fields: { Name: name || "Owner", Business: business, Phone: phone || "", Notes: notes || "", Called: false } }] }) });
-    res.json({ success: true, record: result.records ? result.records[0] : null });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
 
-app.post("/prospects/bulk", async function(req, res) {
-  try {
-    var items = req.body.prospects;
-    if (!items || !items.length) return res.status(400).json({ error: "No prospects provided" });
-    var existingPhones = await getAllExistingPhones();
-    var newItems = items.filter(function(i) { return !i.phone || !existingPhones.has(i.phone); });
-    var dupes = items.length - newItems.length;
-    if (newItems.length === 0) return res.json({ success: true, added: 0, duplicates: dupes, message: "All prospects already exist" });
-    var added = 0;
-    for (var i = 0; i < newItems.length; i += 10) {
-      var batch = newItems.slice(i, i + 10);
-      var records = batch.map(function(p) { return { fields: { Name: p.name || "Owner", Business: p.business || "", Phone: p.phone || "", Notes: p.notes || "", Called: false } }; });
-      await atFetch("Prospects", { method: "POST", body: JSON.stringify({ records: records }) });
-      added += batch.length;
+    // ── Update Prospects table ─────────────────────────────────────────────
+    if (airtableId) {
+      const { newCount } = await updateProspectCallStats(airtableId, outcome);
+
+      // Status update
+      let status = "called";
+      if (outcome === "demo-sent")         status = "demo-sent";
+      if (outcome === "not-interested")    status = "not-interested";
+      if (outcome === "callback-requested") status = "callback-requested";
+      if (["no-answer", "voicemail", "silence-timed-out", "customer-busy"].includes(outcome)) {
+        status = "no-answer";
+      }
+      await ProspectsTable.update(airtableId, { Status: status });
+
+      // Log the call
+      const record = await ProspectsTable.find(airtableId);
+      await logCall(airtableId, record.fields.Name || "", phone, outcome, callId, newCount);
+
+      // SMS for hot leads
+      if (outcome === "demo-sent" && phone && DEMO_VIDEO_URL) {
+        const smsBody = `Hi! This is Mike from AQ Solutions. Here's the AI demo we discussed: ${DEMO_VIDEO_URL}\n\nBook a free strategy call: ${CALENDLY_URL || ""}`;
+        await sendSMS(phone, smsBody);
+      }
     }
-    res.json({ success: true, added: added, duplicates: dupes });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+
+    console.log(`Webhook processed: ${outcome} | ID: ${airtableId} | Call: ${callId}`);
+  } catch (err) {
+    console.error("Webhook processing error:", err);
+  }
 });
 
-// ── Google Places Prospect Finder ───────────────────────────
+// ── Health check ─────────────────────────────────────────────────────────────
+app.get("/health", (req, res) => res.json({ status: "ok", time: new Date().toISOString() }));
 
-app.get("/search-prospects", async function(req, res) {
-  try {
-    var query = req.query.q;
-    if (!query) return res.status(400).json({ error: "q parameter is required" });
-    if (!GOOGLE_PLACES_API_KEY) return res.status(500).json({ error: "GOOGLE_PLACES_API_KEY not set" });
-    var searchUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?query=" + encodeURIComponent(query) + "&key=" + GOOGLE_PLACES_API_KEY;
-    var searchRes = await fetch(searchUrl);
-    var searchData = await searchRes.json();
-    if (!searchData.results || searchData.results.length === 0) return res.json({ total: 0, prospects: [] });
-    var existingPhones = await getAllExistingPhones();
-    var prospects = [];
-    for (var i = 0; i < Math.min(searchData.results.length, 20); i++) {
-      var place = searchData.results[i];
-      var detailUrl = "https://maps.googleapis.com/maps/api/place/details/json?place_id=" + place.place_id + "&fields=name,formatted_phone_number,international_phone_number,formatted_address,rating,business_status,opening_hours&key=" + GOOGLE_PLACES_API_KEY;
-      var detailRes = await fetch(detailUrl);
-      var detailData = await detailRes.json();
-      var detail = detailData.result || {};
-      var phone = (detail.international_phone_number || "").replace(/[\s\-()]/g, "");
-      if (phone && !phone.startsWith("+")) phone = "+1" + phone;
-      prospects.push({ business: detail.name || place.name || "", address: detail.formatted_address || place.formatted_address || "", phone: phone, rating: detail.rating || place.rating || null, status: detail.business_status || "", alreadyInList: phone ? existingPhones.has(phone) : false });
-    }
-    res.json({ total: prospects.length, prospects: prospects });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ── Start server ────────────────────────────────────────────
-app.listen(PORT, function() { console.log("AQ Outreach Bot listening on port " + PORT); });
+app.listen(PORT, () => console.log(`AQ Outreach Bot running on port ${PORT}`));
