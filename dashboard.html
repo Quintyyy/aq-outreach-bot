@@ -529,9 +529,8 @@ Jane Doe, +19081234567, Doe HVAC, Brick"></textarea>
       <thead>
         <tr>
           <th>Priority</th>
-          <th>Name / Business</th>
+          <th>Business / Contact</th>
           <th>Phone</th>
-          <th>City</th>
           <th>Calls</th>
           <th>Last Outcome</th>
           <th>Actions</th>
@@ -609,17 +608,17 @@ function renderTable() {
   const filtered = allProspects.filter(p => {
     const f  = p.fields;
     const ok = !q ||
-      (f.Name         || '').toLowerCase().includes(q) ||
-      (f.BusinessName || '').toLowerCase().includes(q) ||
-      (f.Phone        || '').toLowerCase().includes(q) ||
-      (f.City         || '').toLowerCase().includes(q);
+      (f.Business || '').toLowerCase().includes(q) ||
+      (f.Name     || '').toLowerCase().includes(q) ||
+      (f.Phone    || '').toLowerCase().includes(q) ||
+      (f.Notes    || '').toLowerCase().includes(q);
     const tierOk = !tf || (f.PriorityTier || 'NEW') === tf;
     return ok && tierOk;
   });
 
   const tbody = document.getElementById('prospects-tbody');
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--muted); padding:32px;">No prospects found.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--muted); padding:32px;">No prospects found.</td></tr>`;
     return;
   }
 
@@ -631,28 +630,30 @@ function renderTable() {
     const lastAt  = f.LastCalledAt ? new Date(f.LastCalledAt).toLocaleDateString() : '';
 
     const showRetry = ['RETRY', 'WARM'].includes(tier);
-    const retryBtn  = showRetry
-      ? `<button class="btn-retry-row" onclick="retryCall('${p.id}','${esc(f.Phone)}','${esc(f.Name)}')">🔁 Retry</button>`
+    const displayName = f.Business || f.Name || '—';
+    const displaySub  = (f.Business && f.Name && f.Name !== 'Owner') ? f.Name : '';
+    const phone = f.Phone || '';
+    const retryBtn = showRetry
+      ? `<button class="btn-retry-row" onclick="retryCall('${p.id}','${esc(phone)}','${esc(displayName)}')">🔁 Retry</button>`
       : '';
 
     return `
       <tr>
         <td><span class="badge badge-${tier}"><span class="badge-dot" style="background:var(--${tier.toLowerCase()})"></span>${tier}</span></td>
         <td>
-          <div style="font-weight:600">${esc(f.Name || '—')}</div>
-          <div style="font-size:12px; color:var(--muted)">${esc(f.BusinessName || '')}</div>
+          <div style="font-weight:600">${esc(displayName)}</div>
+          ${displaySub ? `<div style="font-size:12px; color:var(--muted)">${esc(displaySub)}</div>` : ''}
         </td>
-        <td style="font-family:monospace; font-size:13px">${esc(f.Phone || '—')}</td>
-        <td style="color:var(--muted)">${esc(f.City || '—')}</td>
+        <td style="font-family:monospace; font-size:13px">${phone ? esc(phone) : '<span style="color:var(--muted)">No phone</span>'}</td>
         <td>
           <div class="call-count">${calls}<br><small>${lastAt}</small></div>
         </td>
         <td><span style="font-size:13px; color:var(--muted)">${esc(outcome)}</span></td>
         <td>
           <div class="row-actions">
-            <button class="btn-call-row" onclick="callOne('${p.id}','${esc(f.Phone)}','${esc(f.Name)}')">📞 Call</button>
+            ${phone ? `<button class="btn-call-row" onclick="callOne('${p.id}','${esc(phone)}','${esc(displayName)}')">📞 Call</button>` : '<span style="color:var(--muted);font-size:12px">No phone</span>'}
             ${retryBtn}
-            <button class="btn-history-row" onclick="showHistory('${p.id}','${esc(f.Name)}')">📋</button>
+            <button class="btn-history-row" onclick="showHistory('${p.id}','${esc(displayName)}')">📋</button>
           </div>
         </td>
       </tr>
