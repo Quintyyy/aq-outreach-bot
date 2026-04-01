@@ -21,6 +21,16 @@ const {
 
 const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
+// ── Live call progress tracker ──────────────────────────────
+var callProgress = {
+  running: false,
+  total: 0,
+  completed: 0,
+  current: null,
+  results: [],
+  startedAt: null,
+};
+
 // ── Airtable helpers ────────────────────────────────────────
 
 const atFetch = (path, opts = {}) => {
@@ -95,8 +105,7 @@ function buildAssistant(prospect) {
   return {
     name: "Mike",
     model: {
-      provider: "openai",
-      model: "gpt-4o",
+      provider: "openai", model: "gpt-4o",
       messages: [{ role: "system", content: buildSystemPrompt(prospect) }],
       tools: [
         { type: "function", function: { name: "send_demo_video", description: "Send the prospect a text message with the AQ Solutions demo video link.", parameters: { type: "object", properties: { name: { type: "string", description: "The prospect first name" } }, required: ["name"] } } },
@@ -126,11 +135,7 @@ async function createVapiCall(prospect) {
 // ── Routes ──────────────────────────────────────────────────
 
 app.get("/", function(req, res) { res.json({ status: "AQ Outreach Bot running", ts: new Date().toISOString() }); });
-
-app.get("/dashboard", function(req, res) {
-  res.setHeader("Content-Type", "text/html");
-  res.send(readFileSync("./dashboard.html", "utf-8"));
-});
+app.get("/dashboard", function(req, res) { res.setHeader("Content-Type", "text/html"); res.send(readFileSync("./dashboard.html", "utf-8")); });
 
 app.post("/call", async function(req, res) {
   try {
@@ -138,22 +143,60 @@ app.post("/call", async function(req, res) {
     if (!phone) return res.status(400).json({ error: "phone is required" });
     var result = await createVapiCall({ id: null, phone: phone, name: name, business: business });
     res.json({ success: true, callId: result.id, result: result });
-  } catch (err) { console.error("Call error:", err); res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post("/run", async function(req, res) {
   try {
     var p = await getProspects();
     if (!p.length) return res.json({ message: "No uncalled prospects with phone numbers." });
+
+    // Initialize progress
+    callProgress.running = true;
+    callProgress.total = p.length;
+    callProgress.completed = 0;
+    callProgress.current = null;
+    callProgress.results = [];
+    callProgress.startedAt = new Date().toISOString();
+
     res.json({ message: "Run started", total: p.length });
+
     for (var i = 0; i < p.length; i++) {
+      callProgress.current = { index: i + 1, name: p[i].name, business: p[i].business, phone: p[i].phone, status: "dialing" };
       try {
         var call = await createVapiCall(p[i]);
         console.log("Called " + p[i].name + " at " + p[i].business + " — callId: " + call.id);
-      } catch (err) { console.error("Failed to call " + p[i].name + ": " + err.message); }
-      if (i < p.length - 1) await new Promise(function(r) { setTimeout(r, 90000); });
+        callProgress.current.status = "in-call";
+        callProgress.current.callId = call.id;
+        callProgress.results.push({ name: p[i].name, business: p[i].business, phone: p[i].phone, status: "called", callId: call.id });
+      } catch (err) {
+        console.error("Failed to call " + p[i].name + ": " + err.message);
+        callProgress.results.push({ name: p[i].name, business: p[i].business, phone: p[i].phone, status: "failed", error: err.message });
+      }
+      callProgress.completed = i + 1;
+
+      if (i < p.length - 1) {
+        callProgress.current = { index: i + 1, name: p[i].name, business: p[i].business, status: "waiting", nextIn: 90 };
+        // Countdown the wait
+        for (var s = 90; s > 0; s--) {
+          callProgress.current.nextIn = s;
+          await new Promise(function(r) { setTimeout(r, 1000); });
+        }
+      }
     }
-  } catch (err) { console.error("Run error:", err); }
+
+    callProgress.running = false;
+    callProgress.current = null;
+  } catch (err) {
+    console.error("Run error:", err);
+    callProgress.running = false;
+    callProgress.current = null;
+  }
+});
+
+// ── Call Progress endpoint ──────────────────────────────────
+app.get("/progress", function(req, res) {
+  res.json(callProgress);
 });
 
 app.post("/vapi/outreach-webhook", async function(req, res) {
@@ -170,24 +213,14 @@ app.post("/vapi/outreach-webhook", async function(req, res) {
       var params = tc.parameters || (tc.function ? tc.function.parameters : {}) || {};
       var id = tc.id;
       if (tname === "send_demo_video") {
-        try {
-          await twilioClient.messages.create({ body: "Hey " + (params.name || "there") + "! Here is a quick 2-min demo of AQ Solutions: " + DEMO_VIDEO_URL + " — No pressure, just take a look when you get a chance!", from: "+1" + TWILIO_PHONE, to: callPhone });
-          console.log("Demo video SMS sent to " + callPhone);
-          results.push({ toolCallId: id, name: tname, result: "Demo video sent via SMS successfully." });
-        } catch (e) { results.push({ toolCallId: id, name: tname, result: "SMS failed: " + e.message }); }
+        try { await twilioClient.messages.create({ body: "Hey " + (params.name || "there") + "! Here is a quick 2-min demo of AQ Solutions: " + DEMO_VIDEO_URL + " — No pressure, just take a look when you get a chance!", from: "+1" + TWILIO_PHONE, to: callPhone }); console.log("Demo video SMS sent to " + callPhone); results.push({ toolCallId: id, name: tname, result: "Demo video sent via SMS successfully." }); } catch (e) { results.push({ toolCallId: id, name: tname, result: "SMS failed: " + e.message }); }
       } else if (tname === "book_demo_call") {
-        try {
-          await twilioClient.messages.create({ body: "Hey " + (params.name || "there") + "! Here is the link to book your free 15-min AQ Solutions demo: " + CALENDLY_LINK, from: "+1" + TWILIO_PHONE, to: callPhone });
-          console.log("Calendly SMS sent to " + callPhone);
-          results.push({ toolCallId: id, name: tname, result: "Calendly booking link sent via SMS successfully." });
-        } catch (e) { results.push({ toolCallId: id, name: tname, result: "SMS failed: " + e.message }); }
+        try { await twilioClient.messages.create({ body: "Hey " + (params.name || "there") + "! Here is the link to book your free 15-min AQ Solutions demo: " + CALENDLY_LINK, from: "+1" + TWILIO_PHONE, to: callPhone }); console.log("Calendly SMS sent to " + callPhone); results.push({ toolCallId: id, name: tname, result: "Calendly booking link sent via SMS successfully." }); } catch (e) { results.push({ toolCallId: id, name: tname, result: "SMS failed: " + e.message }); }
       } else if (tname === "log_call_result") {
-        var outcome = params.outcome || "unknown";
-        console.log("Call outcome logged mid-call: " + outcome);
-        results.push({ toolCallId: id, name: tname, result: "Outcome " + outcome + " noted." });
-      } else {
-        results.push({ toolCallId: id, name: tname, result: "Unknown tool" });
-      }
+        var outcome = params.outcome || "unknown"; console.log("Call outcome logged mid-call: " + outcome); results.push({ toolCallId: id, name: tname, result: "Outcome " + outcome + " noted." });
+        // Update progress with outcome
+        if (callProgress.current) callProgress.current.outcome = outcome;
+      } else { results.push({ toolCallId: id, name: tname, result: "Unknown tool" }); }
     }
     return res.json({ results: results });
   }
@@ -200,6 +233,15 @@ app.post("/vapi/outreach-webhook", async function(req, res) {
       if (meta.airtableId) await markCalled(meta.airtableId, oc);
       await logCall({ type: "outbound", outcome: oc, business: meta.business || "", phone: meta.phone || (call.customer ? call.customer.number : "") || "" });
       console.log("End-of-call logged — " + (meta.business || "unknown") + " — " + oc);
+      // Update progress result with final outcome
+      if (callProgress.results.length > 0) {
+        for (var j = callProgress.results.length - 1; j >= 0; j--) {
+          if (callProgress.results[j].phone === (meta.phone || "")) {
+            callProgress.results[j].outcome = oc;
+            break;
+          }
+        }
+      }
     } catch (err) { console.error("Airtable update error:", err.message); }
     return res.sendStatus(200);
   }
@@ -212,15 +254,8 @@ app.get("/prospects", async function(req, res) {
   try {
     var params = new URLSearchParams({ pageSize: "100" });
     var allRecords = [], offset;
-    do {
-      if (offset) params.set("offset", offset);
-      var data = await atFetch("Prospects?" + params.toString());
-      allRecords = allRecords.concat(data.records || []);
-      offset = data.offset;
-    } while (offset);
-    var prospects = allRecords.map(function(r) {
-      return { id: r.id, name: r.fields["Name"] || "", business: r.fields["Business"] || "", phone: r.fields["Phone"] || "", called: r.fields["Called"] || false, result: r.fields["Result"] || "", calledAt: r.fields["CalledAt"] || null };
-    });
+    do { if (offset) params.set("offset", offset); var data = await atFetch("Prospects?" + params.toString()); allRecords = allRecords.concat(data.records || []); offset = data.offset; } while (offset);
+    var prospects = allRecords.map(function(r) { return { id: r.id, name: r.fields["Name"] || "", business: r.fields["Business"] || "", phone: r.fields["Phone"] || "", called: r.fields["Called"] || false, result: r.fields["Result"] || "", calledAt: r.fields["CalledAt"] || null }; });
     res.json({ total: prospects.length, prospects: prospects });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -229,15 +264,8 @@ app.get("/call-log", async function(req, res) {
   try {
     var params = new URLSearchParams({ pageSize: "100", "sort[0][field]": "Timestamp", "sort[0][direction]": "desc" });
     var allRecords = [], offset;
-    do {
-      if (offset) params.set("offset", offset);
-      var data = await atFetch("CallLog?" + params.toString());
-      allRecords = allRecords.concat(data.records || []);
-      offset = data.offset;
-    } while (offset);
-    var logs = allRecords.map(function(r) {
-      return { id: r.id, type: r.fields["Type"] || "", outcome: r.fields["Outcome"] || "", business: r.fields["Business"] || "", phone: r.fields["Phone"] || "", timestamp: r.fields["Timestamp"] || null };
-    });
+    do { if (offset) params.set("offset", offset); var data = await atFetch("CallLog?" + params.toString()); allRecords = allRecords.concat(data.records || []); offset = data.offset; } while (offset);
+    var logs = allRecords.map(function(r) { return { id: r.id, type: r.fields["Type"] || "", outcome: r.fields["Outcome"] || "", business: r.fields["Business"] || "", phone: r.fields["Phone"] || "", timestamp: r.fields["Timestamp"] || null }; });
     res.json({ total: logs.length, log: logs });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -251,14 +279,9 @@ app.post("/prospects", async function(req, res) {
     if (phone) {
       var checkParams = new URLSearchParams({ filterByFormula: '{Phone} = "' + phone + '"', maxRecords: "1" });
       var existing = await atFetch("Prospects?" + checkParams.toString());
-      if (existing.records && existing.records.length > 0) {
-        return res.json({ success: false, duplicate: true, existing: existing.records[0].fields });
-      }
+      if (existing.records && existing.records.length > 0) return res.json({ success: false, duplicate: true, existing: existing.records[0].fields });
     }
-    var result = await atFetch("Prospects", {
-      method: "POST",
-      body: JSON.stringify({ records: [{ fields: { Name: name || "Owner", Business: business, Phone: phone || "", Notes: notes || "", Called: false } }] }),
-    });
+    var result = await atFetch("Prospects", { method: "POST", body: JSON.stringify({ records: [{ fields: { Name: name || "Owner", Business: business, Phone: phone || "", Notes: notes || "", Called: false } }] }) });
     res.json({ success: true, record: result.records ? result.records[0] : null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -289,19 +312,11 @@ app.get("/search-prospects", async function(req, res) {
     var query = req.query.q;
     if (!query) return res.status(400).json({ error: "q parameter is required" });
     if (!GOOGLE_PLACES_API_KEY) return res.status(500).json({ error: "GOOGLE_PLACES_API_KEY not set" });
-
     var searchUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?query=" + encodeURIComponent(query) + "&key=" + GOOGLE_PLACES_API_KEY;
     var searchRes = await fetch(searchUrl);
     var searchData = await searchRes.json();
-
-    if (!searchData.results || searchData.results.length === 0) {
-      return res.json({ total: 0, prospects: [] });
-    }
-
-    // Get existing phones for dedup marking
+    if (!searchData.results || searchData.results.length === 0) return res.json({ total: 0, prospects: [] });
     var existingPhones = await getAllExistingPhones();
-
-    // For each result, get phone number via Place Details
     var prospects = [];
     for (var i = 0; i < Math.min(searchData.results.length, 20); i++) {
       var place = searchData.results[i];
@@ -309,27 +324,13 @@ app.get("/search-prospects", async function(req, res) {
       var detailRes = await fetch(detailUrl);
       var detailData = await detailRes.json();
       var detail = detailData.result || {};
-
       var phone = (detail.international_phone_number || "").replace(/[\s\-()]/g, "");
       if (phone && !phone.startsWith("+")) phone = "+1" + phone;
-
-      prospects.push({
-        business: detail.name || place.name || "",
-        address: detail.formatted_address || place.formatted_address || "",
-        phone: phone,
-        rating: detail.rating || place.rating || null,
-        status: detail.business_status || "",
-        alreadyInList: phone ? existingPhones.has(phone) : false,
-      });
+      prospects.push({ business: detail.name || place.name || "", address: detail.formatted_address || place.formatted_address || "", phone: phone, rating: detail.rating || place.rating || null, status: detail.business_status || "", alreadyInList: phone ? existingPhones.has(phone) : false });
     }
-
     res.json({ total: prospects.length, prospects: prospects });
-  } catch (err) {
-    console.error("Search error:", err);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── Start server ────────────────────────────────────────────
-
 app.listen(PORT, function() { console.log("AQ Outreach Bot listening on port " + PORT); });
