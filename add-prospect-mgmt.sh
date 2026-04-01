@@ -1,0 +1,468 @@
+#!/bin/bash
+# Run from ~/aq-outreach-bot
+# Adds: duplicate checking, single add, bulk import, and prospect finder to dashboard
+
+echo "Updating outreach-bot.js with prospect management routes..."
+
+# Add the new routes before "// ── Start server"
+sed -i '' '/\/\/ ── Start server/i\
+// ── Prospect Management ─────────────────────────────────────\
+\
+app.post("/prospects", async (req, res) => {\
+  try {\
+    const { name, business, phone, notes } = req.body;\
+    if (!business) return res.status(400).json({ error: "business is required" });\
+    \
+    // Duplicate check by phone number\
+    if (phone) {\
+      const checkParams = new URLSearchParams({\
+        filterByFormula: "{Phone} = \\\"" + phone + "\\\"",\
+        maxRecords: "1",\
+      });\
+      const existing = await atFetch("Prospects?" + checkParams.toString());\
+      if (existing.records && existing.records.length > 0) {\
+        return res.json({ success: false, duplicate: true, existing: existing.records[0].fields });\
+      }\
+    }\
+    \
+    const result = await atFetch("Prospects", {\
+      method: "POST",\
+      body: JSON.stringify({\
+        records: [{\
+          fields: {\
+            Name: name || "Owner",\
+            Business: business,\
+            Phone: phone || "",\
+            Notes: notes || "",\
+            Called: false,\
+          },\
+        }],\
+      }),\
+    });\
+    res.json({ success: true, record: result.records ? result.records[0] : null });\
+  } catch (err) {\
+    console.error("POST /prospects error:", err);\
+    res.status(500).json({ error: err.message });\
+  }\
+});\
+\
+app.post("/prospects/bulk", async (req, res) => {\
+  try {\
+    const { prospects: items } = req.body;\
+    if (!items || !items.length) return res.status(400).json({ error: "No prospects provided" });\
+    \
+    // Get all existing phone numbers for dedup\
+    const existingParams = new URLSearchParams({ pageSize: "100", fields: ["Phone"] });\
+    let existingPhones = new Set();\
+    let offset;\
+    do {\
+      if (offset) existingParams.set("offset", offset);\
+      const data = await atFetch("Prospects?" + existingParams.toString());\
+      (data.records || []).forEach(r => {\
+        if (r.fields.Phone) existingPhones.add(r.fields.Phone);\
+      });\
+      offset = data.offset;\
+    } while (offset);\
+    \
+    const newItems = items.filter(i => !i.phone || !existingPhones.has(i.phone));\
+    const dupes = items.length - newItems.length;\
+    \
+    if (newItems.length === 0) {\
+      return res.json({ success: true, added: 0, duplicates: dupes, message: "All prospects already exist" });\
+    }\
+    \
+    // Airtable allows max 10 records per request\
+    let added = 0;\
+    for (let i = 0; i < newItems.length; i += 10) {\
+      const batch = newItems.slice(i, i + 10);\
+      const records = batch.map(p => ({\
+        fields: {\
+          Name: p.name || "Owner",\
+          Business: p.business || "",\
+          Phone: p.phone || "",\
+          Notes: p.notes || "",\
+          Called: false,\
+        },\
+      }));\
+      await atFetch("Prospects", {\
+        method: "POST",\
+        body: JSON.stringify({ records }),\
+      });\
+      added += batch.length;\
+    }\
+    \
+    res.json({ success: true, added, duplicates: dupes });\
+  } catch (err) {\
+    console.error("POST /prospects/bulk error:", err);\
+    res.status(500).json({ error: err.message });\
+  }\
+});\
+
+' outreach-bot.js
+
+echo "Routes added. Now updating dashboard..."
+
+cat > dashboard.html << 'DASHEOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AQ Solutions — Outreach Command Center</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'DM Sans', sans-serif; background: #0a0b14; color: #e2e8f0; min-height: 100vh; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .header { padding: 24px 28px 18px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; }
+  .header h1 { font-size: 20px; font-weight: 700; color: #f8fafc; letter-spacing: -0.02em; }
+  .header .sub { font-size: 11px; color: #64748b; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .status-dot.on { background: #10b981; box-shadow: 0 0 8px #10b98180; }
+  .status-dot.off { background: #ef4444; box-shadow: 0 0 8px #ef444480; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; padding: 18px 28px; }
+  .stat { padding: 14px; border-radius: 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); }
+  .stat-val { font-size: 24px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .stat-label { font-size: 10px; color: #64748b; font-weight: 500; margin-top: 3px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .actions { padding: 0 28px 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .btn { padding: 10px 20px; border-radius: 9px; border: none; font-weight: 600; font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.15s; }
+  .btn:hover { filter: brightness(1.1); }
+  .btn-primary { background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; }
+  .btn-primary:disabled { background: rgba(255,255,255,0.04); color: #4a5568; cursor: default; }
+  .btn-green { background: linear-gradient(135deg, #10b981, #059669); color: #fff; }
+  .btn-secondary { background: rgba(255,255,255,0.03); color: #94a3b8; border: 1px solid rgba(255,255,255,0.07); }
+  .tabs { padding: 0 28px 12px; display: flex; gap: 4px; }
+  .tab { padding: 8px 16px; border-radius: 8px; border: none; font-size: 12px; font-weight: 500; cursor: pointer; background: transparent; color: #64748b; font-family: 'DM Sans', sans-serif; }
+  .tab.active { background: rgba(59,130,246,0.15); color: #60a5fa; }
+  .list { padding: 0 28px 28px; display: flex; flex-direction: column; gap: 5px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: rgba(255,255,255,0.015); border: 1px solid rgba(255,255,255,0.04); border-radius: 9px; }
+  .row-icon { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .row-info { flex: 1; min-width: 0; }
+  .row-biz { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+  .row-meta { font-size: 11px; color: #64748b; margin-top: 2px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 500; }
+  .btn-call { padding: 7px 16px; border-radius: 7px; border: none; font-weight: 600; font-size: 11px; background: rgba(59,130,246,0.1); color: #60a5fa; cursor: pointer; white-space: nowrap; }
+  .btn-call:disabled { opacity: 0.5; }
+  .empty { text-align: center; padding: 50px; color: #4a5568; }
+  .toast { position: fixed; top: 20px; right: 20px; z-index: 9999; padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 500; max-width: 340px; backdrop-filter: blur(12px); transition: opacity 0.3s; }
+  .toast.success { background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); color: #34d399; }
+  .toast.error { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+  .toast.hidden { opacity: 0; pointer-events: none; }
+
+  /* Modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 999; backdrop-filter: blur(4px); }
+  .modal-bg.show { display: flex; }
+  .modal { background: #141525; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+  .modal h2 { font-size: 16px; font-weight: 600; color: #f1f5f9; margin-bottom: 20px; }
+  .modal label { font-size: 12px; color: #94a3b8; display: block; margin-bottom: 6px; font-weight: 500; }
+  .modal input, .modal textarea { width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; color: #e2e8f0; font-size: 13px; outline: none; font-family: 'DM Sans', sans-serif; margin-bottom: 14px; }
+  .modal textarea { min-height: 120px; font-family: 'JetBrains Mono', monospace; font-size: 12px; resize: vertical; }
+  .modal .btn-row { display: flex; gap: 10px; margin-top: 6px; }
+  .modal .btn-row .btn { flex: 1; }
+
+  .tab-content { padding: 0 28px; }
+  .helper-text { font-size: 12px; color: #64748b; margin-bottom: 12px; line-height: 1.5; }
+
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
+</style>
+</head>
+<body>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- Add Single Modal -->
+<div class="modal-bg" id="addModal">
+  <div class="modal">
+    <h2>Add Prospect</h2>
+    <label>Business Name *</label>
+    <input id="addBiz" placeholder="e.g. Joe's Plumbing">
+    <label>Contact Name</label>
+    <input id="addName" placeholder="e.g. Joe">
+    <label>Phone</label>
+    <input id="addPhone" placeholder="+17321234567">
+    <label>Notes</label>
+    <input id="addNotes" placeholder="Found on Google Maps, etc.">
+    <div class="btn-row">
+      <button class="btn btn-green" onclick="submitAdd()">Add Prospect</button>
+      <button class="btn btn-secondary" onclick="closeModal('addModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk Import Modal -->
+<div class="modal-bg" id="bulkModal">
+  <div class="modal">
+    <h2>Bulk Import Prospects</h2>
+    <p class="helper-text">Paste one prospect per line. Format: <span class="mono" style="color:#60a5fa">Business Name, Contact Name, Phone</span><br>
+    Example:<br>
+    <span class="mono" style="color:#94a3b8">Joe's Plumbing, Joe, +17321234567<br>ABC HVAC, Owner, +17329876543<br>Mike's Heating, Mike</span><br><br>
+    Phone is optional. Duplicates are automatically skipped.</p>
+    <textarea id="bulkText" placeholder="Joe's Plumbing, Joe, +17321234567
+ABC HVAC, Owner, +17329876543
+Mike's Heating, Mike"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-green" onclick="submitBulk()">Import All</button>
+      <button class="btn btn-secondary" onclick="closeModal('bulkModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <div class="logo">AQ</div>
+    <div>
+      <h1>AQ Solutions</h1>
+      <div class="sub">OUTREACH COMMAND CENTER</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span id="statusDot" class="status-dot off"></span>
+    <span id="statusLabel" class="mono" style="font-size:11px;color:#ef4444">OFFLINE</span>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stats" id="statsRow"></div>
+
+<!-- Actions -->
+<div class="actions">
+  <button class="btn btn-primary" id="btnRun" disabled>📞 Call All (0)</button>
+  <button class="btn btn-green" onclick="openModal('addModal')">+ Add</button>
+  <button class="btn btn-secondary" onclick="openModal('bulkModal')">📋 Bulk Import</button>
+  <button class="btn btn-secondary" onclick="refresh()">↻ Refresh</button>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab active" id="tabProspects" onclick="switchTab('prospects')">Prospects (0)</button>
+  <button class="tab" id="tabCalllog" onclick="switchTab('calllog')">Call Log (0)</button>
+</div>
+
+<!-- Content -->
+<div id="content" class="list"></div>
+
+<script>
+var API = window.location.origin;
+var prospects = [];
+var callLog = [];
+var currentTab = "prospects";
+var calling = null;
+
+var statusColors = {
+  "pending":            { icon: "\u25CB", color: "#94a3b8", bg: "rgba(148,163,184,0.10)" },
+  "interested":         { icon: "\u2605", color: "#38bdf8", bg: "rgba(56,189,248,0.12)" },
+  "demo video sent":    { icon: "\u25B6", color: "#34d399", bg: "rgba(52,211,153,0.12)" },
+  "booking link sent":  { icon: "\u2713", color: "#10b981", bg: "rgba(16,185,129,0.15)" },
+  "callback requested": { icon: "\u21A9", color: "#c084fc", bg: "rgba(192,132,252,0.12)" },
+  "not interested":     { icon: "\u2715", color: "#64748b", bg: "rgba(100,116,139,0.10)" },
+  "voicemail":          { icon: "\u2709", color: "#fb923c", bg: "rgba(251,146,60,0.12)" },
+  "no answer":          { icon: "\u2715", color: "#f87171", bg: "rgba(248,113,113,0.12)" },
+  "unknown":            { icon: "?", color: "#64748b", bg: "rgba(100,116,139,0.10)" },
+};
+
+function getStatus(s) { return statusColors[(s || "pending").toLowerCase()] || statusColors["unknown"]; }
+
+function showToast(msg, type) {
+  var t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "toast " + (type || "success");
+  setTimeout(function() { t.className = "toast hidden"; }, 3500);
+}
+
+function openModal(id) { document.getElementById(id).className = "modal-bg show"; }
+function closeModal(id) { document.getElementById(id).className = "modal-bg"; }
+
+async function fetchProspects() {
+  try {
+    var res = await fetch(API + "/prospects");
+    var data = await res.json();
+    prospects = data.prospects || [];
+    document.getElementById("statusDot").className = "status-dot on";
+    document.getElementById("statusLabel").style.color = "#10b981";
+    document.getElementById("statusLabel").textContent = "LIVE";
+  } catch(e) {
+    document.getElementById("statusDot").className = "status-dot off";
+    document.getElementById("statusLabel").style.color = "#ef4444";
+    document.getElementById("statusLabel").textContent = "OFFLINE";
+  }
+}
+
+async function fetchCallLog() {
+  try {
+    var res = await fetch(API + "/call-log");
+    var data = await res.json();
+    callLog = data.log || data.logs || [];
+  } catch(e) {}
+}
+
+function renderStats() {
+  var total = prospects.length;
+  var uncalled = prospects.filter(function(p) { return !p.called && p.phone; }).length;
+  var called = prospects.filter(function(p) { return p.called; }).length;
+  var noPhone = prospects.filter(function(p) { return !p.phone; }).length;
+  var results = {};
+  prospects.forEach(function(p) { var r = (p.result || "pending").toLowerCase(); results[r] = (results[r] || 0) + 1; });
+
+  var stats = [
+    { label: "Total", value: total, color: "#e2e8f0" },
+    { label: "Uncalled", value: uncalled, color: "#fbbf24" },
+    { label: "Called", value: called, color: "#a78bfa" },
+    { label: "Interested", value: results["interested"] || 0, color: "#38bdf8" },
+    { label: "Demos Sent", value: results["demo video sent"] || 0, color: "#34d399" },
+    { label: "Voicemails", value: results["voicemail"] || 0, color: "#fb923c" },
+    { label: "No Phone", value: noPhone, color: "#64748b" },
+  ];
+
+  document.getElementById("statsRow").innerHTML = stats.map(function(s) {
+    return '<div class="stat"><div class="stat-val" style="color:' + s.color + '">' + s.value + '</div><div class="stat-label">' + s.label + '</div></div>';
+  }).join("");
+
+  document.getElementById("btnRun").textContent = "\uD83D\uDCDE Call All (" + uncalled + ")";
+  document.getElementById("btnRun").disabled = uncalled === 0;
+  document.getElementById("tabProspects").textContent = "Prospects (" + total + ")";
+  document.getElementById("tabCalllog").textContent = "Call Log (" + callLog.length + ")";
+}
+
+function renderProspects() {
+  var el = document.getElementById("content");
+  if (!prospects.length) { el.innerHTML = '<div class="empty"><div style="font-size:28px;margin-bottom:8px">\uD83D\uDCED</div><div>No prospects — click + Add or Bulk Import</div></div>'; return; }
+  el.innerHTML = prospects.map(function(p, i) {
+    var st = getStatus(p.result || (p.called ? "unknown" : "pending"));
+    var hasPhone = !!p.phone;
+    var isCalling = calling === p.phone;
+    return '<div class="row">' +
+      '<div class="row-icon" style="background:' + st.bg + ';color:' + st.color + '">' + st.icon + '</div>' +
+      '<div class="row-info">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<span class="row-biz">' + (p.business || p.name) + '</span>' +
+          '<span class="badge" style="background:' + st.bg + ';color:' + st.color + '">' + (p.result || "Pending") + '</span>' +
+        '</div>' +
+        '<div class="row-meta">' +
+          '<span>' + p.name + '</span>' +
+          (hasPhone ? '<span class="mono" style="font-size:10px">' + p.phone + '</span>' : '<span style="font-style:italic;color:#4a5568">No phone</span>') +
+        '</div>' +
+      '</div>' +
+      (hasPhone && !p.called ? '<button class="btn-call" onclick="callOne(\'' + p.phone + "','" + (p.name||"").replace(/'/g,"\\'") + "','" + (p.business||"").replace(/'/g,"\\'") + '\')"' + (isCalling ? ' disabled' : '') + '>' + (isCalling ? 'Dialing...' : '\uD83D\uDCDE Call') + '</button>' : '') +
+      (p.called ? '<span class="mono" style="font-size:10px;color:#4a5568">' + (p.calledAt ? new Date(p.calledAt).toLocaleDateString() : 'called') + '</span>' : '') +
+    '</div>';
+  }).join("");
+}
+
+function renderCallLog() {
+  var el = document.getElementById("content");
+  if (!callLog.length) { el.innerHTML = '<div class="empty"><div style="font-size:28px;margin-bottom:8px">\uD83D\uDCCB</div><div>No calls logged yet</div></div>'; return; }
+  el.innerHTML = callLog.map(function(log) {
+    var st = getStatus(log.outcome);
+    return '<div class="row">' +
+      '<div class="row-icon" style="background:' + st.bg + ';color:' + st.color + '">' + st.icon + '</div>' +
+      '<div class="row-info">' +
+        '<div class="row-biz">' + (log.business || "Unknown") + '</div>' +
+        '<div class="row-meta">' +
+          '<span class="badge" style="background:' + st.bg + ';color:' + st.color + '">' + (log.outcome || "unknown") + '</span>' +
+          '<span class="mono" style="font-size:10px">' + (log.phone || "") + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<span class="mono" style="font-size:10px;color:#4a5568;white-space:nowrap">' +
+        (log.timestamp ? new Date(log.timestamp).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "") +
+      '</span>' +
+    '</div>';
+  }).join("");
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById("tabProspects").className = tab === "prospects" ? "tab active" : "tab";
+  document.getElementById("tabCalllog").className = tab === "calllog" ? "tab active" : "tab";
+  render();
+}
+
+function render() { renderStats(); if (currentTab === "prospects") renderProspects(); else renderCallLog(); }
+
+async function callOne(phone, name, business) {
+  calling = phone; render();
+  try {
+    var res = await fetch(API + "/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: phone, name: name, business: business }) });
+    var data = await res.json();
+    if (data.success || data.callId) showToast("Calling " + name + "...");
+    else showToast(data.error || "Call failed", "error");
+  } catch(e) { showToast("Call failed: " + e.message, "error"); }
+  setTimeout(function() { calling = null; render(); }, 3000);
+}
+
+document.getElementById("btnRun").onclick = async function() {
+  this.disabled = true; this.textContent = "\u23F3 Running...";
+  try {
+    var res = await fetch(API + "/run", { method: "POST" });
+    var data = await res.json();
+    showToast(data.message || "Batch started");
+  } catch(e) { showToast("Batch failed: " + e.message, "error"); }
+  setTimeout(function() { refresh(); }, 5000);
+};
+
+async function submitAdd() {
+  var biz = document.getElementById("addBiz").value.trim();
+  var name = document.getElementById("addName").value.trim();
+  var phone = document.getElementById("addPhone").value.trim();
+  var notes = document.getElementById("addNotes").value.trim();
+  if (!biz) { showToast("Business name is required", "error"); return; }
+
+  try {
+    var res = await fetch(API + "/prospects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ business: biz, name: name, phone: phone, notes: notes }) });
+    var data = await res.json();
+    if (data.duplicate) { showToast("Duplicate — " + (data.existing.Business || "this number") + " already exists", "error"); return; }
+    if (data.success) { showToast("Added " + biz); closeModal("addModal"); document.getElementById("addBiz").value = ""; document.getElementById("addName").value = ""; document.getElementById("addPhone").value = ""; document.getElementById("addNotes").value = ""; refresh(); }
+    else showToast(data.error || "Failed to add", "error");
+  } catch(e) { showToast("Error: " + e.message, "error"); }
+}
+
+async function submitBulk() {
+  var text = document.getElementById("bulkText").value.trim();
+  if (!text) { showToast("Paste some prospects first", "error"); return; }
+
+  var lines = text.split("\n").filter(function(l) { return l.trim(); });
+  var items = lines.map(function(line) {
+    var parts = line.split(",").map(function(s) { return s.trim(); });
+    return { business: parts[0] || "", name: parts[1] || "Owner", phone: parts[2] || "" };
+  });
+
+  try {
+    var res = await fetch(API + "/prospects/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prospects: items }) });
+    var data = await res.json();
+    if (data.success) {
+      showToast("Added " + data.added + " prospects" + (data.duplicates ? " (" + data.duplicates + " duplicates skipped)" : ""));
+      closeModal("bulkModal");
+      document.getElementById("bulkText").value = "";
+      refresh();
+    } else showToast(data.error || "Import failed", "error");
+  } catch(e) { showToast("Error: " + e.message, "error"); }
+}
+
+async function refresh() { await fetchProspects(); await fetchCallLog(); render(); }
+
+(async function() {
+  await fetchProspects(); await fetchCallLog(); render();
+  setInterval(async function() { await fetchProspects(); await fetchCallLog(); render(); }, 8000);
+})();
+</script>
+</body>
+</html>
+DASHEOF
+
+echo ""
+echo "Done! Both files updated."
+echo ""
+echo "Now run:"
+echo "  git add outreach-bot.js dashboard.html"
+echo "  git commit -m 'feat: prospect management with dedup and bulk import'"
+echo "  git push origin main"
+echo ""
+echo "Your dashboard will have:"
+echo "  - + Add button (single prospect, auto dedup)"
+echo "  - Bulk Import button (paste CSV, auto dedup)"  
+echo "  - Call All button (only calls uncalled prospects)"
+echo "  - Call log tracking"
+echo ""
+echo "Workflow: Google Maps -> copy names/phones -> Bulk Import -> Call All"

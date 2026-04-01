@@ -51,7 +51,7 @@ async function safeUpdate(id, fields) {
   }
 }
 
-async function makeVapiCall(phone, name, airtableId) {
+async function makeVapiCall(phone, name, airtableId, businessName) {
   const formattedPhone = formatPhone(phone);
   if (!formattedPhone) throw new Error("Invalid phone number: " + phone);
   console.log(`Calling ${name} at ${formattedPhone} (original: ${phone})`);
@@ -62,7 +62,7 @@ async function makeVapiCall(phone, name, airtableId) {
       phoneNumberId: VAPI_PHONE_NUMBER_ID,
       assistantId: VAPI_ASSISTANT_ID,
       customer: { number: formattedPhone, name },
-      assistantOverrides: { variableValues: { prospectName: name, airtableId } },
+      assistantOverrides: { variableValues: { prospectName: name || "", businessName: businessName || "", airtableId } },
     }),
   });
   const data = await res.json();
@@ -243,12 +243,12 @@ app.post("/api/call-all", async (req, res) => {
     res.json({ success: true, queued: callable.length });
 
     for (const record of callable) {
-      const name = record.fields.Business || record.fields.Name || "Owner";
+      const name = record.fields.Name || "Owner";
       callSession.current++;
       callSession.currentName = name;
       try {
         await safeUpdate(record.id, { Status: "calling" });
-        await makeVapiCall(record.fields.Phone, name, record.id);
+        await makeVapiCall(record.fields.Phone, name, record.id, record.fields.Business || "");
         callSession.results.push({ name, status: "called" });
       } catch (e) {
         console.error("Call failed for " + name + ":", e.message);
@@ -349,7 +349,7 @@ app.post("/vapi-webhook", async (req, res) => {
       } catch(e) { console.warn("CallLog insert warning:", e.message); }
 
       if (outcome === "demo-sent" && phone && DEMO_VIDEO_URL) {
-        await sendSMS(phone, `Hi! This is Mike from AQ Solutions. Here's the AI demo: ${DEMO_VIDEO_URL}\nBook a call: ${CALENDLY_URL || ""}`).catch(e => console.warn("SMS failed:", e.message));
+        await sendSMS(phone, `Hey! This is Andrew from AQ Solutions. Here's the 2-min AI demo I mentioned: ${DEMO_VIDEO_URL}\nBook a call: ${CALENDLY_URL || ""}`).catch(e => console.warn("SMS failed:", e.message));
       }
     }
     console.log(`Webhook: ${outcome} | ${airtableId}`);
@@ -403,7 +403,7 @@ function scheduleAutoCall() {
       for (const record of callable) {
         try {
           await safeUpdate(record.id, { Status: "calling" });
-          await makeVapiCall(record.fields.Phone, record.fields.Name || "Owner", record.id);
+          await makeVapiCall(record.fields.Phone, record.fields.Name || "Owner", record.id, record.fields.Business || "");
         } catch (e) { console.error(`Auto-call failed for ${record.fields.Name}:`, e.message); }
         await new Promise(r => setTimeout(r, 1500));
       }
