@@ -445,6 +445,55 @@
       position: absolute; top: 3px; left: 3px; transition: left .2s;
     }
     .toggle-track.on .toggle-thumb { left: 19px; }
+
+    /* ── Live Call Tracker ────────────────────────────────────────── */
+    .tracker-panel {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: 14px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+    .tracker-panel.visible { display: block; }
+    .tracker-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .tracker-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .tracker-live { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; animation: pulse 1s infinite; }
+    .tracker-count { font-size: 28px; font-weight: 800; color: var(--accent); }
+    .tracker-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .tracker-progress-track { background: var(--surface2); border-radius: 99px; height: 6px; margin: 12px 0; overflow: hidden; }
+    .tracker-progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #22c55e); border-radius: 99px; transition: width .5s ease; }
+    .tracker-current { font-size: 13px; color: var(--text); margin-top: 8px; }
+    .tracker-current span { color: var(--accent); font-weight: 600; }
+
+    /* ── Dispatch History ─────────────────────────────────────────── */
+    .history-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .history-btn:hover { border-color: var(--accent); }
+    .dispatch-item {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 10px;
+    }
+    .dispatch-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .dispatch-item-date { font-size: 13px; font-weight: 600; }
+    .dispatch-item-stats { display: flex; gap: 12px; font-size: 12px; }
+    .dispatch-stat { padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+    .dispatch-stat.called { background: rgba(79,110,247,.15); color: var(--accent); }
+    .dispatch-stat.failed { background: var(--hot-bg); color: var(--hot); }
+    .dispatch-results { margin-top: 8px; max-height: 150px; overflow-y: auto; }
+    .dispatch-result-row { font-size: 12px; color: var(--muted); padding: 2px 0; display: flex; gap: 8px; }
+    .dispatch-result-row .ok { color: #22c55e; }
+    .dispatch-result-row .fail { color: var(--hot); }
     /* ── Responsive ───────────────────────────────────────────── */
     @media (max-width: 768px) {
       .stats-bar { grid-template-columns: repeat(3, 1fr); }
@@ -544,6 +593,29 @@ Jane Doe, +19081234567, Doe HVAC, Brick"></textarea>
     </div>
   </div>
 
+  <!-- ── Live Call Tracker ─────────────────────────────────────────────── -->
+  <div class="tracker-panel" id="tracker-panel">
+    <div class="tracker-header">
+      <div class="tracker-title">
+        <div class="tracker-live"></div>
+        Live Call Session
+      </div>
+      <div style="font-size:13px; color:var(--muted)" id="tracker-eta"></div>
+    </div>
+    <div style="display:flex; gap:32px; align-items:flex-end">
+      <div>
+        <div class="tracker-count"><span id="tracker-current">0</span> / <span id="tracker-total">0</span></div>
+        <div class="tracker-sub">calls dispatched</div>
+      </div>
+      <div style="flex:1">
+        <div class="tracker-progress-track">
+          <div class="tracker-progress-fill" id="tracker-fill" style="width:0%"></div>
+        </div>
+        <div class="tracker-current">Calling now: <span id="tracker-name">—</span></div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Controls ───────────────────────────────────────────────────────── -->
   <div class="controls">
     <input class="search-input" id="search" placeholder="Search by name, business, phone, city…" oninput="renderTable()" />
@@ -556,6 +628,7 @@ Jane Doe, +19081234567, Doe HVAC, Brick"></textarea>
       <option value="COLD">❄️ Cold</option>
     </select>
     <button class="btn btn-green" onclick="callAll()">📞 Call All New + Retry</button>
+    <button class="history-btn" onclick="showDispatchHistory()">📋 Dispatch History</button>
   </div>
 
   <!-- ── Prospects Table ────────────────────────────────────────────────── -->
@@ -578,6 +651,15 @@ Jane Doe, +19081234567, Doe HVAC, Brick"></textarea>
   </div>
 
 </div><!-- /main -->
+
+<!-- ── Dispatch History Modal ─────────────────────────────────────────────── -->
+<div class="modal-overlay" id="dispatch-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="document.getElementById('dispatch-modal').classList.remove('open')">✕</button>
+    <h3>📋 Dispatch History</h3>
+    <div id="dispatch-modal-body">Loading…</div>
+  </div>
+</div>
 
 <!-- ── Call History Modal ─────────────────────────────────────────────────── -->
 <div class="modal-overlay" id="history-modal">
@@ -766,11 +848,13 @@ async function callAll() {
   try {
     const r = await fetch('/api/call-all', { method: 'POST' });
     const d = await r.json();
-    if (d.success) {
-      showProgress(d.queued);
-      toast(`📞 Queued ${d.queued} calls`, 'success');
+    if (d.success && d.queued > 0) {
+      toast(`📞 Dispatching ${d.queued} calls…`, 'success');
+      startProgressPolling();
+    } else if (d.queued === 0) {
+      toast('No prospects to call right now', '');
     } else {
-      toast(d.error || 'Failed', 'error');
+      toast(d.message || d.error || 'Failed', 'error');
     }
   } catch(e) { toast('Call all failed', 'error'); }
 }
@@ -930,6 +1014,85 @@ async function bulkImport() {
   } catch(e) { toast('Import failed', 'error'); }
 }
 
+
+
+// ── Live Call Tracker ──────────────────────────────────────────────────────
+let progressPoller = null;
+
+function startProgressPolling() {
+  if (progressPoller) return;
+  document.getElementById('tracker-panel').classList.add('visible');
+  progressPoller = setInterval(async () => {
+    try {
+      const r = await fetch('/api/call-progress');
+      const d = await r.json();
+      document.getElementById('tracker-current').textContent = d.current;
+      document.getElementById('tracker-total').textContent   = d.total;
+      document.getElementById('tracker-name').textContent    = d.currentName || '—';
+      const pct = d.total > 0 ? Math.round((d.current / d.total) * 100) : 0;
+      document.getElementById('tracker-fill').style.width = pct + '%';
+      const remaining = d.total - d.current;
+      document.getElementById('tracker-eta').textContent = remaining > 0 ? `~${remaining * 2}s remaining` : '';
+      if (!d.active && d.current === 0) {
+        stopProgressPolling();
+      }
+      if (!d.active && d.total > 0) {
+        document.getElementById('tracker-name').textContent = '✅ Done!';
+        document.getElementById('tracker-eta').textContent  = '';
+        setTimeout(() => {
+          stopProgressPolling();
+          loadAll();
+        }, 3000);
+      }
+    } catch(e) { console.error('Progress poll error:', e); }
+  }, 1200);
+}
+
+function stopProgressPolling() {
+  if (progressPoller) { clearInterval(progressPoller); progressPoller = null; }
+  setTimeout(() => document.getElementById('tracker-panel').classList.remove('visible'), 3500);
+}
+
+// ── Dispatch History ───────────────────────────────────────────────────────
+async function showDispatchHistory() {
+  document.getElementById('dispatch-modal').classList.add('open');
+  document.getElementById('dispatch-modal-body').textContent = 'Loading…';
+  try {
+    const r = await fetch('/api/dispatch-history');
+    const d = await r.json();
+    const history = d.history || [];
+    if (history.length === 0) {
+      document.getElementById('dispatch-modal-body').innerHTML = '<p style="color:var(--muted)">No dispatch sessions yet. Click "Call All" to start one.</p>';
+      return;
+    }
+    document.getElementById('dispatch-modal-body').innerHTML = history.map(h => {
+      const date = h.startedAt ? new Date(h.startedAt).toLocaleString() : '—';
+      const duration = h.completedAt && h.startedAt
+        ? Math.round((new Date(h.completedAt) - new Date(h.startedAt)) / 1000) + 's'
+        : '';
+      const rows = (h.results || []).map(r =>
+        `<div class="dispatch-result-row"><span class="${r.status === 'called' ? 'ok' : 'fail'}">${r.status === 'called' ? '✓' : '✗'}</span>${esc(r.name)}</div>`
+      ).join('');
+      return `
+        <div class="dispatch-item">
+          <div class="dispatch-item-header">
+            <div class="dispatch-item-date">${date} ${duration ? '· ' + duration : ''}</div>
+            <div class="dispatch-item-stats">
+              <span class="dispatch-stat called">✓ ${h.called || 0} called</span>
+              ${h.failed > 0 ? `<span class="dispatch-stat failed">✗ ${h.failed} failed</span>` : ''}
+            </div>
+          </div>
+          <div class="dispatch-results">${rows}</div>
+        </div>
+      `;
+    }).join('');
+  } catch(e) {
+    document.getElementById('dispatch-modal-body').innerHTML = '<p style="color:var(--hot)">Error loading history.</p>';
+  }
+}
+document.getElementById('dispatch-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
 
 // ── Scheduler ──────────────────────────────────────────────────────────────
 async function loadSchedulerStatus() {

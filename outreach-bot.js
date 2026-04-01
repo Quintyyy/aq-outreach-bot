@@ -189,24 +189,60 @@ app.post("/api/retry", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Live session state ───────────────────────────────────────────────────────
+let callSession = { active: false, total: 0, current: 0, currentName: "", startedAt: null, results: [] };
+let dispatchHistory = [];
+
+app.get("/api/call-progress", (req, res) => res.json({ ...callSession }));
+app.get("/api/dispatch-history", (req, res) => res.json({ history: dispatchHistory.slice(0, 50) }));
+
 app.post("/api/call-all", async (req, res) => {
   try {
+    if (callSession.active) return res.json({ success: false, message: "A call session is already running." });
+
     const records = await ProspectsTable.select({ maxRecords: 100 }).all();
     const callable = records.filter(r => {
       const s    = r.fields.Status || "";
       const tier = r.fields.PriorityTier || "NEW";
-      const hasPhone = !!r.fields.Phone;
-      return hasPhone && s !== "calling" && s !== "demo-sent" && s !== "not-interested" && tier !== "COLD" && tier !== "HOT";
+      return !!r.fields.Phone && s !== "calling" && s !== "demo-sent" &&
+             s !== "not-interested" && tier !== "COLD" && tier !== "HOT";
     });
+
+    if (callable.length === 0) return res.json({ success: true, queued: 0, message: "No prospects to call." });
+
+    callSession = { active: true, total: callable.length, current: 0, currentName: "", startedAt: new Date().toISOString(), results: [] };
     res.json({ success: true, queued: callable.length });
+
     for (const record of callable) {
+      const name = record.fields.Business || record.fields.Name || "Owner";
+      callSession.current++;
+      callSession.currentName = name;
       try {
         await safeUpdate(record.id, { Status: "calling" });
-        await makeVapiCall(record.fields.Phone, record.fields.Name || "Owner", record.id);
-      } catch (e) { console.error(`Call failed for ${record.fields.Name}:`, e.message); }
+        await makeVapiCall(record.fields.Phone, name, record.id);
+        callSession.results.push({ name, status: "called" });
+      } catch (e) {
+        console.error("Call failed for " + name + ":", e.message);
+        callSession.results.push({ name, status: "failed" });
+      }
       await new Promise(r => setTimeout(r, 1500));
     }
-  } catch (err) { res.status(500).json({ error: err.message }); }
+
+    const done = {
+      total: callSession.total,
+      called: callSession.results.filter(r => r.status === "called").length,
+      failed: callSession.results.filter(r => r.status === "failed").length,
+      results: callSession.results,
+      startedAt: callSession.startedAt,
+      completedAt: new Date().toISOString(),
+    };
+    dispatchHistory.unshift(done);
+    callSession = { active: false, total: 0, current: 0, currentName: "", startedAt: null, results: [] };
+
+  } catch (err) {
+    callSession.active = false;
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/api/call-history/:airtableId", async (req, res) => {
