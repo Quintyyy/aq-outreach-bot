@@ -164,7 +164,7 @@ app.get("/api/prospects", async (req, res) => {
     const records = await ProspectsTable.select({
       maxRecords: 500,
       fields: [
-        "Name", "Phone", "BusinessName", "Email", "City", "Status",
+        "Name", "Phone", "Business", "Email", "City", "Status",
         "CallCount", "LastOutcome", "LastCalledAt", "PriorityTier",
         "Notes",
       ],
