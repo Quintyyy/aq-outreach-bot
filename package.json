@@ -7,7 +7,8 @@
     "start": "node outreach-bot.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "airtable": "^0.12.2",
+    "express": "^4.22.1",
     "node-fetch": "^3.3.2",
     "twilio": "^5.0.0"
   }
