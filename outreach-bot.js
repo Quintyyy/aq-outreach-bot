@@ -64,7 +64,7 @@ async function makeVapiCall(phone, name, airtableId, businessName) {
     body: JSON.stringify({
       phoneNumberId: VAPI_PHONE_NUMBER_ID,
       assistantId: VAPI_ASSISTANT_ID,
-      customer: { number: formattedPhone, name },
+      customer: { number: formattedPhone, name: isRealName ? name : "" },
       assistantOverrides: { firstMessage: greeting, variableValues: { prospectName: isRealName ? name : "", businessName: isRealBiz ? businessName : "", airtableId } },
     }),
   });
@@ -351,11 +351,12 @@ app.post("/vapi-webhook", async (req, res) => {
         await CallLogTable.create({ ProspectId: airtableId, ProspectName: record.fields.Name || "", Phone: phone, Outcome: outcome, CallId: callId, AttemptNumber: newCount, CalledAt: now });
       } catch(e) { console.warn("CallLog insert warning:", e.message); }
 
-      if (outcome === "demo-sent" && phone && DEMO_VIDEO_URL) {
+      if ((outcome === "demo-sent" || outcome === "completed") && phone && DEMO_VIDEO_URL) {
+        console.log(`SENDING SMS to ${phone}...`);
         await sendSMS(phone, `Hey! This is Andrew from AQ Solutions. Here's the 2-min AI demo I mentioned: ${DEMO_VIDEO_URL}\nBook a call: ${CALENDLY_URL || ""}`).catch(e => console.warn("SMS failed:", e.message));
       }
     }
-    console.log(`Webhook: ${outcome} | ${airtableId}`);
+    console.log(`Webhook: outcome=${outcome} | phone=${phone} | airtableId=${airtableId} | summary=${summary} | endedBy=${endedBy} | DEMO_VIDEO_URL=${DEMO_VIDEO_URL}`);
   } catch (err) { console.error("Webhook error:", err); }
 });
 
