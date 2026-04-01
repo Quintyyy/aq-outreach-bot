@@ -52,6 +52,9 @@ async function safeUpdate(id, fields) {
 }
 
 async function makeVapiCall(phone, name, airtableId, businessName) {
+  const isRealName = name && name !== "Owner" && name !== "" && name !== "undefined";
+  const isRealBiz = businessName && businessName !== "" && businessName !== "undefined";
+  const greeting = isRealName ? `Hey ${name}, how are you doing today?` : "Hey, how are you doing today?";
   const formattedPhone = formatPhone(phone);
   if (!formattedPhone) throw new Error("Invalid phone number: " + phone);
   console.log(`Calling ${name} at ${formattedPhone} (original: ${phone})`);
@@ -62,7 +65,7 @@ async function makeVapiCall(phone, name, airtableId, businessName) {
       phoneNumberId: VAPI_PHONE_NUMBER_ID,
       assistantId: VAPI_ASSISTANT_ID,
       customer: { number: formattedPhone, name },
-      assistantOverrides: { variableValues: { prospectName: name || "", businessName: businessName || "", airtableId } },
+      assistantOverrides: { firstMessage: greeting, variableValues: { prospectName: isRealName ? name : "", businessName: isRealBiz ? businessName : "", airtableId } },
     }),
   });
   const data = await res.json();
