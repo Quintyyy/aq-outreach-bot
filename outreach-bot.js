@@ -52,17 +52,22 @@ async function safeUpdate(id, fields) {
 }
 
 async function makeVapiCall(phone, name, airtableId) {
+  const formattedPhone = formatPhone(phone);
+  if (!formattedPhone) throw new Error("Invalid phone number: " + phone);
+  console.log(`Calling ${name} at ${formattedPhone} (original: ${phone})`);
   const res = await fetch("https://api.vapi.ai/call/phone", {
     method: "POST",
     headers: { Authorization: `Bearer ${VAPI_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       phoneNumberId: VAPI_PHONE_NUMBER_ID,
       assistantId: VAPI_ASSISTANT_ID,
-      customer: { number: phone, name },
+      customer: { number: formattedPhone, name },
       assistantOverrides: { variableValues: { prospectName: name, airtableId } },
     }),
   });
-  return res.json();
+  const data = await res.json();
+  if (data.error || data.message) console.error("Vapi error:", JSON.stringify(data));
+  return data;
 }
 
 async function sendSMS(to, body) {
@@ -122,6 +127,20 @@ app.get("/api/hot-leads", async (req, res) => {
 function normalizePhone(phone) {
   return (phone || "").replace(/\D/g, "").slice(-10);
 }
+
+// Format any phone input into E.164 (+1XXXXXXXXXX) for Vapi
+function formatPhone(phone) {
+  const digits = (phone || "").replace(/\D/g, "");
+  if (!digits) return null;
+  // Already 11 digits starting with 1
+  if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
+  // 10 digits — assume US
+  if (digits.length === 10) return "+1" + digits;
+  // Already has + prefix in original
+  if ((phone || "").trim().startsWith("+")) return "+" + digits;
+  // Fallback — just prepend +1 to last 10
+  return "+1" + digits.slice(-10);
+}
 async function getExistingPhones() {
   const records = await ProspectsTable.select({ fields: ["Phone"], maxRecords: 500 }).all();
   const set = new Set();
@@ -174,10 +193,20 @@ app.post("/api/prospects/bulk", async (req, res) => {
 app.post("/api/call", async (req, res) => {
   try {
     const { airtableId, phone, name } = req.body;
+    if (!phone) return res.status(400).json({ error: "No phone number for this prospect. Add one in Airtable first." });
+    const formatted = formatPhone(phone);
+    if (!formatted) return res.status(400).json({ error: "Invalid phone number: " + phone });
     await safeUpdate(airtableId, { Status: "calling" });
     const callRes = await makeVapiCall(phone, name, airtableId);
+    if (callRes.error || callRes.message) {
+      await safeUpdate(airtableId, { Status: "pending" });
+      return res.status(500).json({ error: callRes.message || callRes.error || "Vapi call failed" });
+    }
     res.json({ success: true, callId: callRes.id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error("Call error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/retry", async (req, res) => {
