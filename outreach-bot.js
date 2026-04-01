@@ -270,3 +270,71 @@ app.post("/vapi-webhook", async (req, res) => {
 
 app.get("/health", (req, res) => res.json({ status: "ok", time: new Date().toISOString() }));
 app.listen(PORT, () => console.log(`AQ Outreach Bot running on port ${PORT}`));
+
+// ─── SCHEDULER ───────────────────────────────────────────────────────────────
+let autoCallEnabled = false;
+let schedulerInterval = null;
+
+function getNextCallTime() {
+  const now = new Date();
+  const next = new Date();
+  next.setHours(8, 0, 0, 0);
+  if (now >= next) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+function msUntil8am() {
+  return getNextCallTime().getTime() - Date.now();
+}
+
+function scheduleAutoCall() {
+  if (schedulerInterval) { clearTimeout(schedulerInterval); schedulerInterval = null; }
+  if (!autoCallEnabled) return;
+
+  const ms = msUntil8am();
+  const hoursUntil = (ms / 1000 / 60 / 60).toFixed(1);
+  console.log(`Auto-call scheduled — firing in ${hoursUntil} hours (8:00 AM)`);
+
+  schedulerInterval = setTimeout(async () => {
+    if (!autoCallEnabled) return;
+    console.log("⏰ Auto-call firing at 8am...");
+    try {
+      const records = await ProspectsTable.select({ maxRecords: 100 }).all();
+      const callable = records.filter(r => {
+        const s    = r.fields.Status || "";
+        const tier = r.fields.PriorityTier || "NEW";
+        return !!r.fields.Phone && s !== "calling" && s !== "demo-sent" &&
+               s !== "not-interested" && tier !== "COLD" && tier !== "HOT";
+      });
+      console.log(`Auto-call: firing ${callable.length} calls`);
+      for (const record of callable) {
+        try {
+          await safeUpdate(record.id, { Status: "calling" });
+          await makeVapiCall(record.fields.Phone, record.fields.Name || "Owner", record.id);
+        } catch (e) { console.error(`Auto-call failed for ${record.fields.Name}:`, e.message); }
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    } catch (e) { console.error("Auto-call error:", e.message); }
+    // Reschedule for next day
+    scheduleAutoCall();
+  }, ms);
+}
+
+// Toggle auto-call on/off
+app.post("/api/scheduler/toggle", (req, res) => {
+  autoCallEnabled = !autoCallEnabled;
+  if (autoCallEnabled) {
+    scheduleAutoCall();
+    const next = getNextCallTime();
+    res.json({ enabled: true, nextCall: next.toISOString(), message: `Auto-call enabled — fires at 8:00 AM` });
+  } else {
+    if (schedulerInterval) { clearTimeout(schedulerInterval); schedulerInterval = null; }
+    res.json({ enabled: false, message: "Auto-call disabled" });
+  }
+});
+
+// Get scheduler status
+app.get("/api/scheduler/status", (req, res) => {
+  const next = autoCallEnabled ? getNextCallTime().toISOString() : null;
+  res.json({ enabled: autoCallEnabled, nextCall: next });
+});

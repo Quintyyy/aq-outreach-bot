@@ -422,6 +422,29 @@
       margin-bottom: 10px;
     }
 
+
+    /* ── Scheduler Toggle ─────────────────────────────────────────── */
+    .scheduler-wrap {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 8px 14px; cursor: pointer;
+      transition: border-color .2s;
+    }
+    .scheduler-wrap:hover { border-color: var(--accent); }
+    .scheduler-wrap.active { border-color: #22c55e; background: rgba(34,197,94,.08); }
+    .scheduler-icon { font-size: 18px; }
+    .scheduler-label { font-size: 12px; font-weight: 700; color: var(--text); }
+    .scheduler-status { font-size: 11px; color: var(--muted); }
+    .toggle-track {
+      width: 36px; height: 20px; background: var(--border);
+      border-radius: 99px; position: relative; transition: background .2s; flex-shrink: 0;
+    }
+    .toggle-track.on { background: #22c55e; }
+    .toggle-thumb {
+      width: 14px; height: 14px; background: #fff; border-radius: 50%;
+      position: absolute; top: 3px; left: 3px; transition: left .2s;
+    }
+    .toggle-track.on .toggle-thumb { left: 19px; }
     /* ── Responsive ───────────────────────────────────────────── */
     @media (max-width: 768px) {
       .stats-bar { grid-template-columns: repeat(3, 1fr); }
@@ -438,7 +461,19 @@
 <div class="header">
   <div class="logo">AQ<span> Solutions</span></div>
   <div style="font-size:13px; color:var(--muted);">AI Outreach Dashboard · Andrew Quintero</div>
-  <button class="btn btn-primary" onclick="loadAll()">↻ Refresh</button>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <div class="scheduler-wrap" id="scheduler-wrap" onclick="toggleScheduler()" title="Auto-call all NEW + RETRY prospects at 8:00 AM daily">
+      <div class="scheduler-icon">⏰</div>
+      <div class="scheduler-text">
+        <div class="scheduler-label">8AM Auto-Call</div>
+        <div class="scheduler-status" id="scheduler-status">Loading…</div>
+      </div>
+      <div class="toggle-track" id="toggle-track">
+        <div class="toggle-thumb"></div>
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="loadAll()">↻ Refresh</button>
+  </div>
 </div>
 
 <div class="main">
@@ -572,7 +607,7 @@ const TIER_LABELS = {
 window.addEventListener('DOMContentLoaded', loadAll);
 
 async function loadAll() {
-  await Promise.all([loadProspects(), loadHotLeads()]);
+  await Promise.all([loadProspects(), loadHotLeads(), loadSchedulerStatus()]);
 }
 
 // ── Prospects ──────────────────────────────────────────────────────────────
@@ -892,6 +927,43 @@ async function bulkImport() {
   } catch(e) { toast('Import failed', 'error'); }
 }
 
+
+// ── Scheduler ──────────────────────────────────────────────────────────────
+async function loadSchedulerStatus() {
+  try {
+    const r = await fetch('/api/scheduler/status');
+    const d = await r.json();
+    updateSchedulerUI(d.enabled, d.nextCall);
+  } catch(e) { console.error('Scheduler status error:', e); }
+}
+
+function updateSchedulerUI(enabled, nextCall) {
+  const wrap   = document.getElementById('scheduler-wrap');
+  const track  = document.getElementById('toggle-track');
+  const status = document.getElementById('scheduler-status');
+
+  if (enabled) {
+    wrap.classList.add('active');
+    track.classList.add('on');
+    const next = nextCall ? new Date(nextCall).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '8:00 AM';
+    status.textContent = 'Fires at ' + next + ' daily';
+    status.style.color = '#22c55e';
+  } else {
+    wrap.classList.remove('active');
+    track.classList.remove('on');
+    status.textContent = 'Off — click to enable';
+    status.style.color = '';
+  }
+}
+
+async function toggleScheduler() {
+  try {
+    const r = await fetch('/api/scheduler/toggle', { method: 'POST' });
+    const d = await r.json();
+    updateSchedulerUI(d.enabled, d.nextCall);
+    toast(d.enabled ? '⏰ Auto-call enabled — fires at 8:00 AM daily' : 'Auto-call disabled', d.enabled ? 'success' : '');
+  } catch(e) { toast('Scheduler error', 'error'); }
+}
 // ── Utilities ──────────────────────────────────────────────────────────────
 function esc(s) {
   return String(s || '')
