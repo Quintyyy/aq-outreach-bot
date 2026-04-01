@@ -892,6 +892,7 @@ async function addFromFinder(idx) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, phone, businessName: biz.name, city: '', email: '' }),
     });
+    if (d.duplicate) { toast(`⚠️ ${d.message}`, 'error'); return; }
     toast(`✅ Added ${name}`, 'success');
     loadProspects();
   } catch(e) { toast('Failed to add', 'error'); }
@@ -918,7 +919,9 @@ async function bulkImport() {
     });
     const d = await r.json();
     if (d.success) {
-      toast(`✅ Imported ${d.created} prospects`, 'success');
+      let msg = `✅ Imported ${d.created} prospects`;
+      if (d.skipped > 0) msg += ` · ${d.skipped} duplicate(s) skipped`;
+      toast(msg, 'success');
       document.getElementById('bulk-input').value = '';
       loadProspects();
     } else {

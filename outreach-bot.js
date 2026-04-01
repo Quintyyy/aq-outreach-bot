@@ -118,9 +118,25 @@ app.get("/api/hot-leads", async (req, res) => {
   }
 });
 
+// ── Dedup helper ─────────────────────────────────────────────────────────────
+function normalizePhone(phone) {
+  return (phone || "").replace(/\D/g, "").slice(-10);
+}
+async function getExistingPhones() {
+  const records = await ProspectsTable.select({ fields: ["Phone"], maxRecords: 500 }).all();
+  const set = new Set();
+  for (const r of records) { const n = normalizePhone(r.fields.Phone); if (n) set.add(n); }
+  return set;
+}
+
 app.post("/api/prospects", async (req, res) => {
   try {
     const { name, phone, businessName, business, city, notes } = req.body;
+    if (!phone) return res.status(400).json({ error: "Phone number required" });
+    const existing = await getExistingPhones();
+    if (existing.has(normalizePhone(phone))) {
+      return res.json({ success: false, duplicate: true, message: "This phone number already exists in your prospect list." });
+    }
     const record = await ProspectsTable.create({
       Name: name || "", Business: businessName || business || "",
       Phone: phone || "", Notes: notes || (city ? `City: ${city}` : ""), Status: "pending",
@@ -132,8 +148,16 @@ app.post("/api/prospects", async (req, res) => {
 app.post("/api/prospects/bulk", async (req, res) => {
   try {
     const { prospects } = req.body;
+    const existing = await getExistingPhones();
+    const toAdd = []; const skipped = [];
+    for (const p of prospects) {
+      const phone = p.phone || p.Phone || "";
+      const norm = normalizePhone(phone);
+      if (!norm || existing.has(norm)) { skipped.push(p.businessName || p.Business || phone); }
+      else { existing.add(norm); toAdd.push(p); }
+    }
     const chunks = [];
-    for (let i = 0; i < prospects.length; i += 10) chunks.push(prospects.slice(i, i + 10));
+    for (let i = 0; i < toAdd.length; i += 10) chunks.push(toAdd.slice(i, i + 10));
     let created = 0;
     for (const chunk of chunks) {
       await ProspectsTable.create(chunk.map(p => ({
@@ -144,7 +168,7 @@ app.post("/api/prospects/bulk", async (req, res) => {
       })));
       created += chunk.length;
     }
-    res.json({ success: true, created });
+    res.json({ success: true, created, skipped: skipped.length, skippedNames: skipped });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
