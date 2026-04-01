@@ -1,364 +1,304 @@
-import express from "express";
-import fetch from "node-fetch";
-import Airtable from "airtable";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+const express = require('express');
+const cors = require('cors');
 const app = express();
+app.use(cors());
 app.use(express.json());
-app.use(express.static(__dirname));
 
-const {
-  AIRTABLE_API_KEY, AIRTABLE_BASE_ID,
-  VAPI_API_KEY, VAPI_PHONE_NUMBER_ID, VAPI_ASSISTANT_ID,
-  TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER,
-  DEMO_VIDEO_URL, CALENDLY_URL, GOOGLE_PLACES_API_KEY,
-  PORT = 3000,
-} = process.env;
+const PORT = process.env.PORT || 3001;
 
-const base = new Airtable({ apiKey: AIRTABLE_API_KEY }).base(AIRTABLE_BASE_ID);
-const ProspectsTable = base("Prospects");
-const CallLogTable   = base("CallLog");
+let prospects = [
+  { id: 1,  name: "Dave Cortes",    business: "All Systems Heating",        phone: "+17329080428", status: "pending", notes: "Closes 5pm, no weekend coverage", called: false, result: null, calledAt: null },
+  { id: 2,  name: "Owner",          business: "MyGuy Plumbing",             phone: "+17328632775", status: "pending", notes: "Closes 5pm, Ryan is owner",       called: false, result: null, calledAt: null },
+  { id: 3,  name: "Owner",          business: "A.D.E. Heating",             phone: "+16096936050", status: "pending", notes: "Closes 4pm",                      called: false, result: null, calledAt: null },
+  { id: 4,  name: "Owner",          business: "BC Express",                 phone: "+17322402828", status: "pending", notes: "Closes 5pm",                      called: false, result: null, calledAt: null },
+  { id: 5,  name: "Owner",          business: "Mathis Bros Sewer",          phone: "+17324587633", status: "pending", notes: "Closes 4pm",                      called: false, result: null, calledAt: null },
+  { id: 6,  name: "Owner",          business: "Proficient Plumbing",        phone: "",             status: "pending", notes: "Has Facebook page",               called: false, result: null, calledAt: null },
+  { id: 7,  name: "Robert Garon",   business: "Garon T Plumbing",           phone: "",             status: "pending", notes: "Has Facebook page",               called: false, result: null, calledAt: null },
+  { id: 8,  name: "Chris Walton",   business: "Chris Walton Sr Plumbing",   phone: "",             status: "pending", notes: "Has Facebook page",               called: false, result: null, calledAt: null },
+  { id: 9,  name: "Owner",          business: "Bailey Plumbing",            phone: "",             status: "pending", notes: "Has Facebook page",               called: false, result: null, calledAt: null },
+  { id: 10, name: "Jay",            business: "Kettle's Heating",           phone: "",             status: "pending", notes: "Has Facebook page",               called: false, result: null, calledAt: null },
+  { id: 11, name: "Raymond",        business: "Raymond James Hoben",        phone: "",             status: "pending", notes: "Has Facebook page",               called: false, result: null, calledAt: null },
+  { id: 12, name: "Owner",          business: "Lezgus Plumbing",            phone: "+18005402618", status: "pending", notes: "No Facebook — call only",         called: false, result: null, calledAt: null },
+  { id: 13, name: "Owner",          business: "Care Temp LLC",              phone: "+18557888367", status: "pending", notes: "No Facebook — call only",         called: false, result: null, calledAt: null },
+  { id: 14, name: "Owner",          business: "Murawski Plumbing",          phone: "+17325262989", status: "pending", notes: "No Facebook — call only",         called: false, result: null, calledAt: null },
+  { id: 15, name: "Will",           business: "Comfort Zone Home Services", phone: "",             status: "pending", notes: "Has Facebook page",               called: false, result: null, calledAt: null },
+];
 
-function getPriorityTier(lastOutcome, callCount) {
-  if (!lastOutcome || !callCount || callCount === 0) return "NEW";
-  const o = (lastOutcome || "").toLowerCase();
-  if (o.includes("demo-sent") || o.includes("interested")) return "HOT";
-  if (o.includes("callback") || o.includes("call back") || o.includes("later")) return "WARM";
-  if (o.includes("not-interested") || o.includes("not interested")) return "COLD";
-  if (o.includes("voicemail") || o.includes("no-answer") || o.includes("no answer") ||
-      o.includes("silence") || o.includes("busy") || o.includes("timed-out")) return "RETRY";
-  return "NEW";
+const JOSH_SYSTEM_PROMPT = `You are Josh, a friendly and natural-sounding sales rep calling on behalf of AQ Solutions. You're based in Ocean County, New Jersey. Your boss Andrew built an AI system that answers business calls 24/7 for plumbing and HVAC companies.
+
+## YOUR PERSONALITY
+- You sound like a real local guy, NOT a robot or telemarketer
+- You're warm, casual, and respectful of their time
+- You speak naturally with small talk and verbal fillers like "yeah", "honestly", "you know"
+- You NEVER sound scripted or pushy
+- If they're busy, you're cool about it — offer to call back or text them info
+- You have a slight New Jersey casual tone
+
+## CALL FLOW
+
+### 1. OPENING
+- "Hey, is this [contact name]? My name's Josh, I work with a company called AQ Solutions right here in Ocean County. Got a real quick question for you if you've got 30 seconds."
+
+### 2. QUALIFYING QUESTION
+- "So quick question — do you guys have somebody handling your phones after hours? Like nights and weekends, when calls come in?"
+
+### 3. PITCH
+- "Basically what it does is — when a call comes in that you'd miss, our AI picks up. It sounds like a real person, asks the right questions, figures out if it's an emergency, books the appointment if needed, and then texts you and emails you the full summary. You never miss a lead again."
+
+### 4. CLOSE
+- Option A: "I've got a quick 90-second video that shows exactly how it works. Want me to text it to this number?"
+- Option B: "Would you want to hop on a quick 15-minute call with Andrew?"
+
+### 5. OBJECTIONS
+- "I'm not interested": "No worries at all. Mind if I ask — do you ever get calls after hours that you end up missing?"
+- "How much?": "It starts at $497 a month — way less than an answering service, and it actually books appointments."
+- "Is this a robot?": "Ha — I'm actually an AI assistant, yeah. But that's kind of the point, right?"
+
+## RULES
+- NEVER be pushy. If they say no twice, wrap up politely.
+- ALWAYS try to at least send the demo video.
+- Keep the total call under 3 minutes unless they're really engaged.
+- If voicemail: leave short message then call send_demo_video function.
+- ALWAYS call log_call_result at the end of every call.`;
+
+const OUTBOUND_ASSISTANT_CONFIG = {
+  name: "AQ Solutions - Sales Outreach",
+  model: {
+    provider: "openai",
+    model: "gpt-4o",
+    temperature: 0.7,
+    systemPrompt: JOSH_SYSTEM_PROMPT,
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "send_demo_video",
+          description: "Send the prospect a text message with the demo video link.",
+          parameters: {
+            type: "object",
+            properties: {
+              phone: { type: "string" },
+              businessName: { type: "string" },
+              contactName: { type: "string" }
+            },
+            required: ["phone", "businessName"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "book_demo_call",
+          description: "Book a demo call with Andrew.",
+          parameters: {
+            type: "object",
+            properties: {
+              phone: { type: "string" },
+              contactName: { type: "string" },
+              businessName: { type: "string" },
+              preferredTime: { type: "string" },
+              email: { type: "string" }
+            },
+            required: ["phone", "contactName", "businessName"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "log_call_result",
+          description: "Log the outcome of the call. ALWAYS call this at the end of every call.",
+          parameters: {
+            type: "object",
+            properties: {
+              outcome: { type: "string", enum: ["interested", "demo_sent", "demo_booked", "callback_requested", "not_interested", "voicemail", "no_answer", "wrong_number"] },
+              contactName: { type: "string" },
+              businessName: { type: "string" },
+              notes: { type: "string" },
+              hasAfterHoursCoverage: { type: "boolean" }
+            },
+            required: ["outcome", "businessName"]
+          }
+        }
+      }
+    ],
+  },
+  voice: {
+    provider: "11labs",
+    voiceId: "TxGEqnHWrfWFTfGW9XjX",
+    stability: 0.6,
+    similarityBoost: 0.75,
+  },
+  firstMessage: "Hey, is this {{customerName}}? My name's Josh, I work with a company called AQ Solutions right here in Ocean County. Got a real quick question for you if you've got 30 seconds.",
+  serverUrl: process.env.WEBHOOK_URL || "https://YOUR-RAILWAY-URL.up.railway.app/vapi/outreach-webhook",
+  endCallPhrases: ["goodbye", "have a good one", "take care"],
+  maxDurationSeconds: 300,
+};
+
+let twilioClient;
+try {
+  const twilio = require('twilio');
+  twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+} catch (e) {
+  console.log('[TWILIO] Client not initialized:', e.message);
 }
 
-const PRIORITY_ORDER = { HOT: 0, WARM: 1, NEW: 2, RETRY: 3, COLD: 4 };
+let callLog = [];
 
-async function safeUpdate(id, fields) {
+app.get('/api/prospects', (req, res) => {
+  res.json({ prospects, stats: getStats() });
+});
+
+app.post('/api/prospects', (req, res) => {
+  const { name, business, phone, notes } = req.body;
+  const newProspect = { id: prospects.length + 1, name: name || "Owner", business, phone, status: "pending", notes: notes || "", called: false, result: null, calledAt: null };
+  prospects.push(newProspect);
+  res.json({ success: true, prospect: newProspect });
+});
+
+app.post('/api/call/:id', async (req, res) => {
+  const prospect = prospects.find(p => p.id === parseInt(req.params.id));
+  if (!prospect) return res.status(404).json({ error: "Prospect not found" });
+  if (!prospect.phone) return res.status(400).json({ error: "No phone number for this prospect" });
+
   try {
-    await ProspectsTable.update(id, fields);
-  } catch (e) {
-    console.warn("Airtable update warning:", e.message);
-    try {
-      const safe = {};
-      if (fields.Status)  safe.Status  = fields.Status;
-      if (fields.Result)  safe.Result  = fields.Result;
-      if (fields.CalledAt) safe.CalledAt = fields.CalledAt;
-      if (Object.keys(safe).length > 0) await ProspectsTable.update(id, safe);
-    } catch (e2) { console.error("Fallback update failed:", e2.message); }
-  }
-}
-
-async function makeVapiCall(phone, name, airtableId) {
-  const res = await fetch("https://api.vapi.ai/call/phone", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${VAPI_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      phoneNumberId: VAPI_PHONE_NUMBER_ID,
-      assistantId: VAPI_ASSISTANT_ID,
-      customer: { number: phone, name },
-      assistantOverrides: { variableValues: { prospectName: name, airtableId } },
-    }),
-  });
-  return res.json();
-}
-
-async function sendSMS(to, body) {
-  if (!TWILIO_ACCOUNT_SID) return;
-  const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
-  await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
-    method: "POST",
-    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ To: to, From: TWILIO_FROM_NUMBER, Body: body }),
-  });
-}
-
-app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "dashboard.html")));
-
-app.get("/api/prospects", async (req, res) => {
-  try {
-    const records = await ProspectsTable.select({ maxRecords: 500 }).all();
-    const prospects = records.map(r => {
-      const f = r.fields;
-      const callCount   = f.CallCount || 0;
-      const lastOutcome = f.LastOutcome || f.Result || "";
-      const tier        = f.PriorityTier || getPriorityTier(lastOutcome, callCount);
-      return {
-        id: r.id,
-        fields: {
-          Name: f.Name || "", Business: f.Business || "", Phone: f.Phone || "",
-          Notes: f.Notes || "", Status: f.Status || "", Result: f.Result || "",
-          CalledAt: f.CalledAt || "", CallCount: callCount,
-          LastOutcome: lastOutcome, PriorityTier: tier,
-          LastCalledAt: f.LastCalledAt || f.CalledAt || "",
-        },
-      };
-    });
-    prospects.sort((a, b) => (PRIORITY_ORDER[a.fields.PriorityTier] ?? 99) - (PRIORITY_ORDER[b.fields.PriorityTier] ?? 99));
-    res.json({ prospects });
+    const callResult = await triggerVapiCall(prospect);
+    prospect.called = true;
+    prospect.calledAt = new Date().toISOString();
+    prospect.status = "calling";
+    res.json({ success: true, call: callResult, prospect });
   } catch (err) {
-    console.error("GET /api/prospects:", err.message);
+    console.error('[CALL ERROR]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/api/hot-leads", async (req, res) => {
-  try {
-    const records = await ProspectsTable.select({ maxRecords: 500 }).all();
-    const hot = records.filter(r => {
-      const tier    = r.fields.PriorityTier;
-      const outcome = (r.fields.LastOutcome || r.fields.Result || "").toLowerCase();
-      return tier === "HOT" || outcome.includes("demo-sent") || outcome.includes("interested");
-    });
-    res.json({ hotLeads: hot.map(r => ({ id: r.id, fields: r.fields })) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+app.post('/api/call-batch', async (req, res) => {
+  const { delayBetweenCalls = 60 } = req.body;
+  const pendingWithPhone = prospects.filter(p => !p.called && p.phone && p.status === 'pending');
+
+  if (pendingWithPhone.length === 0) return res.json({ message: "No pending prospects with phone numbers" });
+
+  const results = [];
+  for (let i = 0; i < pendingWithPhone.length; i++) {
+    const prospect = pendingWithPhone[i];
+    setTimeout(async () => {
+      try {
+        await triggerVapiCall(prospect);
+        prospect.called = true;
+        prospect.calledAt = new Date().toISOString();
+        prospect.status = "calling";
+      } catch (err) {
+        prospect.status = "call_failed";
+      }
+    }, i * delayBetweenCalls * 1000);
+    results.push({ id: prospect.id, business: prospect.business, scheduledIn: `${i * delayBetweenCalls}s` });
   }
+
+  res.json({ message: `Queued ${pendingWithPhone.length} calls`, schedule: results });
 });
 
-// ── Dedup helper ─────────────────────────────────────────────────────────────
-function normalizePhone(phone) {
-  return (phone || "").replace(/\D/g, "").slice(-10);
-}
-async function getExistingPhones() {
-  const records = await ProspectsTable.select({ fields: ["Phone"], maxRecords: 500 }).all();
-  const set = new Set();
-  for (const r of records) { const n = normalizePhone(r.fields.Phone); if (n) set.add(n); }
-  return set;
-}
+app.post('/vapi/outreach-webhook', async (req, res) => {
+  const payload = req.body;
+  const toolCalls = payload?.message?.toolCalls || [];
+  const results = [];
 
-app.post("/api/prospects", async (req, res) => {
-  try {
-    const { name, phone, businessName, business, city, notes } = req.body;
-    if (!phone) return res.status(400).json({ error: "Phone number required" });
-    const existing = await getExistingPhones();
-    if (existing.has(normalizePhone(phone))) {
-      return res.json({ success: false, duplicate: true, message: "This phone number already exists in your prospect list." });
-    }
-    const record = await ProspectsTable.create({
-      Name: name || "", Business: businessName || business || "",
-      Phone: phone || "", Notes: notes || (city ? `City: ${city}` : ""), Status: "pending",
-    });
-    res.json({ success: true, id: record.id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  for (const toolCall of toolCalls) {
+    const fnName = toolCall?.function?.name;
+    const args = toolCall?.function?.arguments || {};
 
-app.post("/api/prospects/bulk", async (req, res) => {
-  try {
-    const { prospects } = req.body;
-    const existing = await getExistingPhones();
-    const toAdd = []; const skipped = [];
-    for (const p of prospects) {
-      const phone = p.phone || p.Phone || "";
-      const norm = normalizePhone(phone);
-      if (!norm || existing.has(norm)) { skipped.push(p.businessName || p.Business || phone); }
-      else { existing.add(norm); toAdd.push(p); }
-    }
-    const chunks = [];
-    for (let i = 0; i < toAdd.length; i += 10) chunks.push(toAdd.slice(i, i + 10));
-    let created = 0;
-    for (const chunk of chunks) {
-      await ProspectsTable.create(chunk.map(p => ({
-        fields: {
-          Name: p.name || p.Name || "", Business: p.businessName || p.business || p.Business || "",
-          Phone: p.phone || p.Phone || "", Notes: p.city ? `City: ${p.city}` : "", Status: "pending",
-        },
-      })));
-      created += chunk.length;
-    }
-    res.json({ success: true, created, skipped: skipped.length, skippedNames: skipped });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+    switch (fnName) {
+      case 'send_demo_video': {
+        const demoUrl = process.env.DEMO_VIDEO_URL || 'https://aqsolutions.com/demo';
+        const calendlyLink = process.env.CALENDLY_LINK || 'https://calendly.com/aqsolutions';
+        const smsBody = `Hey${args.contactName ? ' ' + args.contactName : ''}! This is from AQ Solutions — here's the 90-second demo:\n\n🎥 ${demoUrl}\n\nWant to try it free for 7 days? Book a call:\n📅 ${calendlyLink}\n\nQuestions? Text Andrew: (848) 389-3351`;
 
-app.post("/api/call", async (req, res) => {
-  try {
-    const { airtableId, phone, name } = req.body;
-    await safeUpdate(airtableId, { Status: "calling" });
-    const callRes = await makeVapiCall(phone, name, airtableId);
-    res.json({ success: true, callId: callRes.id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post("/api/retry", async (req, res) => {
-  try {
-    const { airtableId, phone, name } = req.body;
-    await safeUpdate(airtableId, { Status: "calling" });
-    const callRes = await makeVapiCall(phone, name, airtableId);
-    res.json({ success: true, callId: callRes.id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post("/api/call-all", async (req, res) => {
-  try {
-    const records = await ProspectsTable.select({ maxRecords: 100 }).all();
-    const callable = records.filter(r => {
-      const s    = r.fields.Status || "";
-      const tier = r.fields.PriorityTier || "NEW";
-      const hasPhone = !!r.fields.Phone;
-      return hasPhone && s !== "calling" && s !== "demo-sent" && s !== "not-interested" && tier !== "COLD" && tier !== "HOT";
-    });
-    res.json({ success: true, queued: callable.length });
-    for (const record of callable) {
-      try {
-        await safeUpdate(record.id, { Status: "calling" });
-        await makeVapiCall(record.fields.Phone, record.fields.Name || "Owner", record.id);
-      } catch (e) { console.error(`Call failed for ${record.fields.Name}:`, e.message); }
-      await new Promise(r => setTimeout(r, 1500));
-    }
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get("/api/call-history/:airtableId", async (req, res) => {
-  try {
-    const records = await CallLogTable.select({
-      filterByFormula: `{ProspectId} = '${req.params.airtableId}'`,
-      sort: [{ field: "CalledAt", direction: "desc" }],
-    }).all();
-    res.json({ history: records.map(r => ({
-      id: r.id, outcome: r.fields.Outcome || "", attemptNumber: r.fields.AttemptNumber || 1,
-      calledAt: r.fields.CalledAt || "", callId: r.fields.CallId || "",
-    }))});
-  } catch (err) { res.json({ history: [] }); }
-});
-
-app.post("/api/places-search", async (req, res) => {
-  try {
-    const { query, location } = req.body;
-    if (!GOOGLE_PLACES_API_KEY) return res.status(500).json({ error: "No Google Places API key" });
-
-    const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query + " " + location)}&key=${GOOGLE_PLACES_API_KEY}`;
-    const searchData = await (await fetch(searchUrl)).json();
-
-    const results = [];
-    for (const place of (searchData.results || []).slice(0, 10)) {
-      try {
-        const detailUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=name,formatted_phone_number,formatted_address&key=${GOOGLE_PLACES_API_KEY}`;
-        const detail = await (await fetch(detailUrl)).json();
-        const d = detail.result || {};
-        results.push({ name: d.name || place.name, address: d.formatted_address || place.formatted_address, phone: d.formatted_phone_number || "", placeId: place.place_id });
-      } catch(e) {
-        results.push({ name: place.name, address: place.formatted_address, phone: "", placeId: place.place_id });
-      }
-    }
-    res.json({ results });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post("/vapi-webhook", async (req, res) => {
-  res.sendStatus(200);
-  try {
-    const msg = req.body?.message;
-    if (msg?.type !== "end-of-call-report") return;
-
-    const callId     = msg.call?.id || "";
-    const airtableId = msg.call?.assistantOverrides?.variableValues?.airtableId || msg.assistantOverrides?.variableValues?.airtableId;
-    const phone      = msg.call?.customer?.number || "";
-    const summary    = (msg.summary || "").toLowerCase();
-    const endedBy    = msg.endedReason || "";
-
-    let outcome = "unknown";
-    if (["customer-did-not-pick-up","no-answer"].includes(endedBy)) outcome = "no-answer";
-    else if (endedBy === "voicemail")         outcome = "voicemail";
-    else if (endedBy === "silence-timed-out") outcome = "silence-timed-out";
-    else if (endedBy === "customer-busy")     outcome = "customer-busy";
-    else if (summary.includes("not interested")) outcome = "not-interested";
-    else if (summary.includes("call back") || summary.includes("callback")) outcome = "callback-requested";
-    else if (summary.includes("demo") || summary.includes("interested")) outcome = "demo-sent";
-    else if (endedBy === "assistant-ended-call") outcome = "completed";
-
-    if (airtableId) {
-      const record = await ProspectsTable.find(airtableId);
-      const newCount = (record.fields.CallCount || 0) + 1;
-      const now = new Date().toISOString();
-      const tier = getPriorityTier(outcome, newCount);
-
-      const statusMap = { "demo-sent": "demo-sent", "not-interested": "not-interested", "callback-requested": "callback-requested" };
-      const noAnswerOutcomes = ["no-answer","voicemail","silence-timed-out","customer-busy"];
-      const status = statusMap[outcome] || (noAnswerOutcomes.includes(outcome) ? "no-answer" : "called");
-
-      await safeUpdate(airtableId, { Status: status, Result: outcome, CalledAt: now, CallCount: newCount, LastOutcome: outcome, PriorityTier: tier, LastCalledAt: now });
-
-      try {
-        await CallLogTable.create({ ProspectId: airtableId, ProspectName: record.fields.Name || "", Phone: phone, Outcome: outcome, CallId: callId, AttemptNumber: newCount, CalledAt: now });
-      } catch(e) { console.warn("CallLog insert warning:", e.message); }
-
-      if (outcome === "demo-sent" && phone && DEMO_VIDEO_URL) {
-        await sendSMS(phone, `Hi! This is Mike from AQ Solutions. Here's the AI demo: ${DEMO_VIDEO_URL}\nBook a call: ${CALENDLY_URL || ""}`).catch(e => console.warn("SMS failed:", e.message));
-      }
-    }
-    console.log(`Webhook: ${outcome} | ${airtableId}`);
-  } catch (err) { console.error("Webhook error:", err); }
-});
-
-app.get("/health", (req, res) => res.json({ status: "ok", time: new Date().toISOString() }));
-app.listen(PORT, () => console.log(`AQ Outreach Bot running on port ${PORT}`));
-
-// ─── SCHEDULER ───────────────────────────────────────────────────────────────
-let autoCallEnabled = false;
-let schedulerInterval = null;
-
-function getNextCallTime() {
-  const now = new Date();
-  const next = new Date();
-  next.setHours(8, 0, 0, 0);
-  if (now >= next) next.setDate(next.getDate() + 1);
-  return next;
-}
-
-function msUntil8am() {
-  return getNextCallTime().getTime() - Date.now();
-}
-
-function scheduleAutoCall() {
-  if (schedulerInterval) { clearTimeout(schedulerInterval); schedulerInterval = null; }
-  if (!autoCallEnabled) return;
-
-  const ms = msUntil8am();
-  const hoursUntil = (ms / 1000 / 60 / 60).toFixed(1);
-  console.log(`Auto-call scheduled — firing in ${hoursUntil} hours (8:00 AM)`);
-
-  schedulerInterval = setTimeout(async () => {
-    if (!autoCallEnabled) return;
-    console.log("⏰ Auto-call firing at 8am...");
-    try {
-      const records = await ProspectsTable.select({ maxRecords: 100 }).all();
-      const callable = records.filter(r => {
-        const s    = r.fields.Status || "";
-        const tier = r.fields.PriorityTier || "NEW";
-        return !!r.fields.Phone && s !== "calling" && s !== "demo-sent" &&
-               s !== "not-interested" && tier !== "COLD" && tier !== "HOT";
-      });
-      console.log(`Auto-call: firing ${callable.length} calls`);
-      for (const record of callable) {
         try {
-          await safeUpdate(record.id, { Status: "calling" });
-          await makeVapiCall(record.fields.Phone, record.fields.Name || "Owner", record.id);
-        } catch (e) { console.error(`Auto-call failed for ${record.fields.Name}:`, e.message); }
-        await new Promise(r => setTimeout(r, 1500));
+          if (twilioClient && args.phone) await twilioClient.messages.create({ body: smsBody, from: process.env.TWILIO_PHONE, to: args.phone });
+          const prospect = prospects.find(p => p.phone === args.phone);
+          if (prospect) { prospect.status = "demo_sent"; prospect.result = "demo_sent"; }
+          callLog.push({ type: 'demo_sent', phone: args.phone, business: args.businessName, timestamp: new Date().toISOString() });
+          results.push({ name: fnName, result: "Demo SMS sent" });
+        } catch (err) {
+          results.push({ name: fnName, result: `SMS failed: ${err.message}` });
+        }
+        break;
       }
-    } catch (e) { console.error("Auto-call error:", e.message); }
-    // Reschedule for next day
-    scheduleAutoCall();
-  }, ms);
+
+      case 'book_demo_call': {
+        const calendlyLink = process.env.CALENDLY_LINK || 'https://calendly.com/aqsolutions';
+        const bookingSms = `Hey ${args.contactName || 'there'}! Here's the link to book your AQ Solutions demo with Andrew:\n\n📅 ${calendlyLink}\n\nPick any time that works!`;
+
+        try {
+          if (twilioClient && args.phone) await twilioClient.messages.create({ body: bookingSms, from: process.env.TWILIO_PHONE, to: args.phone });
+          const prospect = prospects.find(p => p.phone === args.phone);
+          if (prospect) { prospect.status = "demo_booked"; prospect.result = "demo_booked"; }
+          callLog.push({ type: 'demo_booked', phone: args.phone, business: args.businessName, timestamp: new Date().toISOString() });
+          results.push({ name: fnName, result: "Booking link sent" });
+        } catch (err) {
+          results.push({ name: fnName, result: `Booking SMS failed: ${err.message}` });
+        }
+        break;
+      }
+
+      case 'log_call_result': {
+        const prospect = prospects.find(p => p.business.toLowerCase().includes((args.businessName || '').toLowerCase()));
+        if (prospect) {
+          prospect.status = args.outcome;
+          prospect.result = args.outcome;
+          prospect.notes += ` | Result: ${args.outcome}. ${args.notes || ''}`;
+        }
+        callLog.push({ type: 'call_result', outcome: args.outcome, business: args.businessName, notes: args.notes, timestamp: new Date().toISOString() });
+        results.push({ name: fnName, result: "Call logged" });
+        break;
+      }
+
+      default:
+        results.push({ name: fnName, result: "Unknown function" });
+    }
+  }
+
+  res.json({ results });
+});
+
+app.get('/api/call-log', (req, res) => { res.json({ log: callLog, stats: getStats() }); });
+
+app.get('/api/stats', (req, res) => { res.json(getStats()); });
+
+app.get('/', (req, res) => { res.json({ service: "AQ Solutions Outreach Bot", status: "online", prospects: prospects.length, stats: getStats() }); });
+
+async function triggerVapiCall(prospect) {
+  const vapiApiKey = process.env.VAPI_API_KEY;
+  const phoneNumberId = process.env.VAPI_PHONE_NUMBER_ID;
+
+  if (!vapiApiKey) throw new Error('VAPI_API_KEY not set');
+  if (!phoneNumberId) throw new Error('VAPI_PHONE_NUMBER_ID not set');
+
+  const assistantConfig = { ...OUTBOUND_ASSISTANT_CONFIG };
+  assistantConfig.firstMessage = assistantConfig.firstMessage.replace('{{customerName}}', prospect.name !== 'Owner' ? prospect.name : 'the owner');
+
+  const response = await fetch('https://api.vapi.ai/call/phone', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${vapiApiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phoneNumberId, customer: { number: prospect.phone, name: prospect.name }, assistant: assistantConfig, metadata: { prospectId: prospect.id, businessName: prospect.business } }),
+  });
+
+  if (!response.ok) { const errText = await response.text(); throw new Error(`Vapi API error ${response.status}: ${errText}`); }
+  const data = await response.json();
+  return data;
 }
 
-// Toggle auto-call on/off
-app.post("/api/scheduler/toggle", (req, res) => {
-  autoCallEnabled = !autoCallEnabled;
-  if (autoCallEnabled) {
-    scheduleAutoCall();
-    const next = getNextCallTime();
-    res.json({ enabled: true, nextCall: next.toISOString(), message: `Auto-call enabled — fires at 8:00 AM` });
-  } else {
-    if (schedulerInterval) { clearTimeout(schedulerInterval); schedulerInterval = null; }
-    res.json({ enabled: false, message: "Auto-call disabled" });
-  }
-});
+function getStats() {
+  return {
+    totalProspects: prospects.length,
+    pending: prospects.filter(p => p.status === 'pending').length,
+    called: prospects.filter(p => p.called).length,
+    interested: prospects.filter(p => ['interested', 'demo_sent', 'demo_booked'].includes(p.status)).length,
+    demosSent: prospects.filter(p => p.status === 'demo_sent').length,
+    demosBooked: prospects.filter(p => p.status === 'demo_booked').length,
+    notInterested: prospects.filter(p => p.status === 'not_interested').length,
+    voicemails: prospects.filter(p => p.status === 'voicemail').length,
+  };
+}
 
-// Get scheduler status
-app.get("/api/scheduler/status", (req, res) => {
-  const next = autoCallEnabled ? getNextCallTime().toISOString() : null;
-  res.json({ enabled: autoCallEnabled, nextCall: next });
-});
+app.listen(PORT, () => { console.log(`🚀 AQ Solutions Outreach Bot running on port ${PORT}`); });

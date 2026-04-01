@@ -892,10 +892,11 @@ async function addFromFinder(idx) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, phone, businessName: biz.name, city: '', email: '' }),
     });
-    if (d.duplicate) { toast(`⚠️ ${d.message}`, 'error'); return; }
+    if (d.duplicate) { toast(`⚠️ Already in your list: ${name}`, 'error'); return; }
+    if (!d.success) { toast(d.error || 'Failed to add', 'error'); return; }
     toast(`✅ Added ${name}`, 'success');
     loadProspects();
-  } catch(e) { toast('Failed to add', 'error'); }
+  } catch(e) { toast('Failed to add — check phone number', 'error'); }
 }
 
 // ── Bulk Import ────────────────────────────────────────────────────────────
