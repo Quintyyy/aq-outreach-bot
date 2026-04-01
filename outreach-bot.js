@@ -132,9 +132,8 @@ async function getExistingPhones() {
 app.post("/api/prospects", async (req, res) => {
   try {
     const { name, phone, businessName, business, city, notes } = req.body;
-    if (!phone) return res.status(400).json({ error: "Phone number required" });
     const existing = await getExistingPhones();
-    if (existing.has(normalizePhone(phone))) {
+    if (phone && existing.has(normalizePhone(phone))) {
       return res.json({ success: false, duplicate: true, message: "This phone number already exists in your prospect list." });
     }
     const record = await ProspectsTable.create({
@@ -300,11 +299,16 @@ let autoCallEnabled = false;
 let schedulerInterval = null;
 
 function getNextCallTime() {
+  // Fire at 8:00 AM Eastern Time (UTC-4 during EDT, UTC-5 during EST)
+  // We use UTC+12 offset: 8am ET = 12:00 UTC (EDT) or 13:00 UTC (EST)
   const now = new Date();
-  const next = new Date();
-  next.setHours(8, 0, 0, 0);
-  if (now >= next) next.setDate(next.getDate() + 1);
-  return next;
+  const nowET = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const nextET = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  nextET.setHours(8, 0, 0, 0);
+  if (nowET >= nextET) nextET.setDate(nextET.getDate() + 1);
+  // Convert back to UTC by finding the difference
+  const diff = nextET - nowET;
+  return new Date(now.getTime() + diff);
 }
 
 function msUntil8am() {
