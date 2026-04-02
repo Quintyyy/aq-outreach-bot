@@ -82,7 +82,7 @@ async function sendSMS(to, body) {
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
     method: "POST",
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ To: formattedTo, From: TWILIO_FROM_NUMBER, Body: body }),
+    body: new URLSearchParams({ To: formattedTo, From: "+17329367514", Body: body }),
   });
   const data = await res.json();
   if (data.sid) { console.log("SMS SUCCESS:", data.sid); }
