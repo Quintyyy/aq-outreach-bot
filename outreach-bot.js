@@ -360,6 +360,19 @@ app.post("/vapi-webhook", async (req, res) => {
   } catch (err) { console.error("Webhook error:", err); }
 });
 
+
+app.get("/api/test-sms", async (req, res) => {
+  try {
+    const to = req.query.phone;
+    if (!to) return res.json({ error: "Add ?phone=+1XXXXXXXXXX" });
+    console.log("TEST SMS to", to, "DEMO_VIDEO_URL=", DEMO_VIDEO_URL);
+    if (!TWILIO_ACCOUNT_SID) return res.json({ error: "No TWILIO_ACCOUNT_SID set" });
+    if (!DEMO_VIDEO_URL) return res.json({ error: "No DEMO_VIDEO_URL set" });
+    await sendSMS(to, "Test from AQ Solutions: " + (DEMO_VIDEO_URL || "NO URL SET"));
+    res.json({ success: true, sent_to: to });
+  } catch (err) { res.json({ error: err.message }); }
+});
+
 app.get("/health", (req, res) => res.json({ status: "ok", time: new Date().toISOString() }));
 app.listen(PORT, () => console.log(`AQ Outreach Bot running on port ${PORT}`));
 
