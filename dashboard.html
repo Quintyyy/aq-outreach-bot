@@ -502,6 +502,53 @@
       table th:nth-child(4),
       table td:nth-child(4) { display: none; }
     }
+  
+    /* Live Call Monitor */
+    .call-monitor { background: linear-gradient(135deg, rgba(79,110,247,.06) 0%, rgba(124,58,237,.06) 100%); border: 1px solid rgba(79,110,247,.3); border-radius: 16px; padding: 0; margin-bottom: 24px; overflow: hidden; }
+    .cm-top-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; gap: 16px; }
+    .cm-top-bar h2 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .cm-top-bar .cm-pulse { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; animation: pulse 1s infinite; }
+    .cm-batch-info { font-size: 13px; color: var(--muted); flex: 1; }
+    .cm-batch-info strong { color: var(--text); }
+    .cm-eta { font-size: 12px; color: var(--accent); font-weight: 600; }
+    .cm-progress-track { height: 4px; background: var(--surface2); }
+    .cm-progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #22c55e); transition: width .5s ease; width: 0%; }
+    .cm-panels { display: grid; grid-template-columns: 240px 1fr 280px; min-height: 260px; }
+    .cm-queue { background: rgba(0,0,0,.15); border-right: 1px solid var(--border); padding: 14px; overflow-y: auto; max-height: 300px; }
+    .cm-queue h4 { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+    .cm-queue-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 4px; font-size: 12px; background: rgba(255,255,255,.03); border: 1px solid transparent; }
+    .cm-queue-item.waiting { color: var(--muted); }
+    .cm-queue-item.next { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.3); color: var(--warm); }
+    .cm-queue-item .q-name { font-weight: 600; }
+    .cm-queue-item .q-phone { font-size: 11px; opacity: .7; }
+    .cm-active { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; position: relative; }
+    .cm-active.calling { animation: activePulse 2s ease-in-out infinite; }
+    @keyframes activePulse { 0%, 100% { background: transparent; } 50% { background: rgba(79,110,247,.05); } }
+    .cm-active-name { font-size: 24px; font-weight: 800; margin-bottom: 4px; }
+    .cm-active-phone { font-size: 14px; color: var(--muted); font-family: monospace; margin-bottom: 16px; }
+    .cm-active-timer { font-size: 36px; font-weight: 800; color: var(--accent); font-family: monospace; margin-bottom: 8px; }
+    .cm-active-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+    .cm-status-ringing { background: rgba(245,158,11,.15); color: var(--warm); }
+    .cm-status-connected { background: rgba(34,197,94,.15); color: #22c55e; }
+    .cm-status-ended { background: var(--cold-bg); color: var(--cold); }
+    .cm-active-idle { color: var(--muted); font-size: 14px; }
+    .cm-completed { background: rgba(0,0,0,.15); border-left: 1px solid var(--border); padding: 14px; overflow-y: auto; max-height: 300px; }
+    .cm-completed h4 { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+    .cm-completed-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 4px; font-size: 12px; background: rgba(255,255,255,.03); border-left: 3px solid var(--muted); }
+    .cm-completed-item.outcome-answered { border-left-color: #22c55e; }
+    .cm-completed-item.outcome-voicemail { border-left-color: var(--warm); }
+    .cm-completed-item.outcome-busy { border-left-color: var(--hot); }
+    .cm-completed-item .c-name { font-weight: 600; }
+    .cm-completed-item .c-outcome { font-size: 11px; font-weight: 600; margin-top: 2px; }
+    .cm-completed-item .c-outcome.green { color: #22c55e; }
+    .cm-completed-item .c-outcome.yellow { color: var(--warm); }
+    .cm-completed-item .c-outcome.red { color: var(--hot); }
+    .cm-completed-item .c-meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .cm-stats-bar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--border); border-top: 1px solid var(--border); }
+    .cm-stat { background: var(--surface); padding: 12px; text-align: center; }
+    .cm-stat-num { font-size: 20px; font-weight: 700; }
+    .cm-stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; margin-top: 2px; }
+    @media (max-width: 768px) { .cm-panels { grid-template-columns: 1fr; } .cm-queue, .cm-completed { max-height: 200px; } .cm-stats-bar { grid-template-columns: repeat(3, 1fr); } }
   </style>
 </head>
 <body>
@@ -560,6 +607,39 @@
     </div>
     <div class="hot-cards" id="hot-cards">
       <div class="hot-empty">Loading hot leads…</div>
+    </div>
+  </div>
+
+  
+
+  <!-- LIVE CALL MONITOR -->
+  <div class="call-monitor" id="call-monitor">
+    <div class="cm-top-bar">
+      <h2><span class="cm-pulse" id="cm-pulse"></span> Live Call Monitor</h2>
+      <div class="cm-batch-info" id="cm-batch-info">Waiting for call session…</div>
+      <div class="cm-eta" id="cm-eta"></div>
+    </div>
+    <div class="cm-progress-track"><div class="cm-progress-fill" id="cm-progress-fill"></div></div>
+    <div class="cm-panels">
+      <div class="cm-queue"><h4>📋 Queue</h4><div id="cm-queue-list"><div style="color:var(--muted); font-size:12px;">No active session</div></div></div>
+      <div class="cm-active" id="cm-active">
+        <div class="cm-active-idle" id="cm-active-idle">No active call — start a batch to see live progress</div>
+        <div id="cm-active-content" style="display:none;">
+          <div class="cm-active-name" id="cm-active-name">—</div>
+          <div class="cm-active-phone" id="cm-active-phone">—</div>
+          <div class="cm-active-timer" id="cm-active-timer">00:00</div>
+          <div class="cm-active-status cm-status-ringing" id="cm-active-status">RINGING</div>
+        </div>
+      </div>
+      <div class="cm-completed"><h4>✅ Completed</h4><div id="cm-completed-list"><div style="color:var(--muted); font-size:12px;">No calls completed yet today</div></div></div>
+    </div>
+    <div class="cm-stats-bar">
+      <div class="cm-stat"><div class="cm-stat-num" id="cm-stat-total">0</div><div class="cm-stat-label">Total Today</div></div>
+      <div class="cm-stat"><div class="cm-stat-num" id="cm-stat-answered" style="color:#22c55e">0</div><div class="cm-stat-label">Answered</div></div>
+      <div class="cm-stat"><div class="cm-stat-num" id="cm-stat-voicemail" style="color:var(--warm)">0</div><div class="cm-stat-label">Voicemails</div></div>
+      <div class="cm-stat"><div class="cm-stat-num" id="cm-stat-busy" style="color:var(--hot)">0</div><div class="cm-stat-label">Busy/Failed</div></div>
+      <div class="cm-stat"><div class="cm-stat-num" id="cm-stat-avg" style="color:var(--accent)">—</div><div class="cm-stat-label">Avg Duration</div></div>
+      <div class="cm-stat"><div class="cm-stat-num" id="cm-stat-hotleads" style="color:var(--hot)">0</div><div class="cm-stat-label">Hot Leads</div></div>
     </div>
   </div>
 
@@ -686,7 +766,7 @@ const TIER_LABELS = {
 };
 
 // ── Init ───────────────────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', loadAll);
+window.addEventListener('DOMContentLoaded', function() { loadAll(); startCallMonitorPolling(); });
 
 async function loadAll() {
   await Promise.all([loadProspects(), loadHotLeads(), loadSchedulerStatus()]);
@@ -1147,6 +1227,109 @@ function toast(msg, type = '') {
   el.className   = `show ${type}`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+}
+
+
+// ── LIVE CALL MONITOR ─────────────────────────────────────────────────
+let cmPoller = null;
+let cmCallStartTime = null;
+let cmTimerInterval = null;
+
+function startCallMonitorPolling() {
+  pollCallMonitor();
+  cmPoller = setInterval(pollCallMonitor, 5000);
+}
+
+async function pollCallMonitor() {
+  try {
+    const r = await fetch('/api/call-monitor');
+    const d = await r.json();
+    updateCallMonitorUI(d);
+  } catch(e) { console.error('Call monitor poll error:', e); }
+}
+
+function updateCallMonitorUI(data) {
+  const session = data.session;
+  const completed = data.completedCalls || [];
+  const stats = data.stats;
+  const batchInfo = document.getElementById('cm-batch-info');
+  const etaEl = document.getElementById('cm-eta');
+  const progressFill = document.getElementById('cm-progress-fill');
+  const pulseEl = document.getElementById('cm-pulse');
+  if (session.active) {
+    batchInfo.innerHTML = 'Calling <strong>' + session.current + ' of ' + session.total + '</strong> prospects';
+    const remaining = session.total - session.current;
+    const etaSec = remaining * (stats.avgDuration || 45);
+    etaEl.textContent = '~' + Math.ceil(etaSec / 60) + ' min remaining';
+    progressFill.style.width = (session.total > 0 ? Math.round((session.current / session.total) * 100) : 0) + '%';
+    pulseEl.style.display = '';
+  } else {
+    batchInfo.textContent = completed.length > 0 ? completed.length + ' calls completed today' : 'Waiting for call session\u2026';
+    etaEl.textContent = '';
+    progressFill.style.width = completed.length > 0 ? '100%' : '0%';
+    pulseEl.style.display = 'none';
+  }
+  var queueList = document.getElementById('cm-queue-list');
+  var queue = session.queue || [];
+  if (queue.length > 0) {
+    queueList.innerHTML = queue.map(function(q, i) {
+      var cls = i === 0 ? 'next' : 'waiting';
+      return '<div class="cm-queue-item ' + cls + '"><div class="q-name">' + esc(q.name) + '</div><div class="q-phone">' + esc(q.phone) + '</div></div>';
+    }).join('');
+  } else {
+    queueList.innerHTML = '<div style="color:var(--muted); font-size:12px;">' + (session.active ? 'Queue empty' : 'No active session') + '</div>';
+  }
+  var activeIdle = document.getElementById('cm-active-idle');
+  var activeContent = document.getElementById('cm-active-content');
+  var activePanel = document.getElementById('cm-active');
+  if (session.active && session.currentBusiness) {
+    activeIdle.style.display = 'none';
+    activeContent.style.display = '';
+    activePanel.classList.add('calling');
+    document.getElementById('cm-active-name').textContent = session.currentBusiness;
+    document.getElementById('cm-active-phone').textContent = session.currentPhone || '\u2014';
+    var statusEl = document.getElementById('cm-active-status');
+    var st = (session.currentStatus || 'ringing').toLowerCase();
+    statusEl.textContent = st.toUpperCase();
+    statusEl.className = 'cm-active-status cm-status-' + (st === 'connected' ? 'connected' : st === 'ended' || st === 'failed' ? 'ended' : 'ringing');
+    if (session.currentStartedAt) {
+      if (cmCallStartTime !== session.currentStartedAt) {
+        cmCallStartTime = session.currentStartedAt;
+        if (cmTimerInterval) clearInterval(cmTimerInterval);
+        cmTimerInterval = setInterval(function() {
+          var elapsed = Math.floor((Date.now() - new Date(cmCallStartTime).getTime()) / 1000);
+          var mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+          var secs = String(elapsed % 60).padStart(2, '0');
+          document.getElementById('cm-active-timer').textContent = mins + ':' + secs;
+        }, 1000);
+      }
+    }
+  } else {
+    activeIdle.style.display = '';
+    activeContent.style.display = 'none';
+    activePanel.classList.remove('calling');
+    if (cmTimerInterval) { clearInterval(cmTimerInterval); cmTimerInterval = null; cmCallStartTime = null; }
+    document.getElementById('cm-active-timer').textContent = '00:00';
+  }
+  var completedList = document.getElementById('cm-completed-list');
+  if (completed.length > 0) {
+    completedList.innerHTML = completed.map(function(c) {
+      var outcome = c.outcome || 'unknown';
+      var outcomeClass = 'outcome-busy'; var colorClass = 'red';
+      if (['completed','demo-sent','callback-requested','not-interested','customer-ended-call'].indexOf(outcome) >= 0) { outcomeClass = 'outcome-answered'; colorClass = 'green'; }
+      else if (['voicemail','silence-timed-out'].indexOf(outcome) >= 0) { outcomeClass = 'outcome-voicemail'; colorClass = 'yellow'; }
+      var time = c.calledAt ? new Date(c.calledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+      return '<div class="cm-completed-item ' + outcomeClass + '"><div class="c-name">' + esc(c.name) + '</div><div class="c-outcome ' + colorClass + '">' + esc(outcome) + '</div><div class="c-meta">' + time + '</div></div>';
+    }).join('');
+  } else {
+    completedList.innerHTML = '<div style="color:var(--muted); font-size:12px;">No calls completed yet today</div>';
+  }
+  document.getElementById('cm-stat-total').textContent = stats.totalToday || 0;
+  document.getElementById('cm-stat-answered').textContent = stats.answered || 0;
+  document.getElementById('cm-stat-voicemail').textContent = stats.voicemails || 0;
+  document.getElementById('cm-stat-busy').textContent = stats.busyFailed || 0;
+  document.getElementById('cm-stat-avg').textContent = stats.avgDuration ? stats.avgDuration + 's' : '\u2014';
+  document.getElementById('cm-stat-hotleads').textContent = stats.hotLeads || 0;
 }
 </script>
 </body>
