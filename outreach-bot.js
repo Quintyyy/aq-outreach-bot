@@ -50,7 +50,10 @@ async function safeUpdate(id, fields) {
 }
 
 async function makeVapiCall(phone, name, airtableId, businessName) {
-    const isRealName = name && name !== "Owner" && name !== "" && name !== "undefined";
+    const bizWords = ["plumbing","heating","hvac","cooling","electric","service","improvement","inc","llc","corp","guaranteed","comfort","proficient","tradition","drain","tech","pro","asap","express","repair","solutions","mechanical","contractors","air"];
+    const nameLower = (name || "").toLowerCase().trim();
+    const bizLower = (businessName || "").toLowerCase().trim();
+    const isRealName = name && name !== "Owner" && name !== "" && name !== "undefined" && name !== "null" && name !== "Name" && nameLower !== bizLower && !bizWords.some(w => nameLower.includes(w)) && nameLower.split(" ").length <= 3;
     const isRealBiz = businessName && businessName !== "" && businessName !== "undefined";
     const greeting = isRealName ? `Hey ${name}, how are you doing today?` : "Hey, how are you doing today?";
     const formattedPhone = formatPhone(phone);
