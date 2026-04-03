@@ -831,7 +831,7 @@ function renderTable() {
     const displaySub  = (f.Business && f.Name && f.Name !== 'Owner') ? f.Name : '';
     const phone = f.Phone || '';
     const retryBtn = showRetry
-      ? `<button class="btn-retry-row" onclick="retryCall('${p.id}','${esc(phone)}','${esc(displayName)}')">🔁 Retry</button>`
+      ? `<button class="btn-retry-row" onclick="retryCall('${p.id}','${jsEsc(phone)}','${jsEsc(displayName)}')">🔁 Retry</button>`
       : '';
 
     return `
@@ -848,9 +848,9 @@ function renderTable() {
         <td><span style="font-size:13px; color:var(--muted)">${esc(outcome)}</span></td>
         <td>
           <div class="row-actions">
-            ${phone ? `<button class="btn-call-row" onclick="callOne('${p.id}','${esc(phone)}','${esc(displayName)}')">📞 Call</button>` : '<span style="color:var(--muted);font-size:12px">No phone</span>'}
+            ${phone ? `<button class="btn-call-row" onclick="callOne('${p.id}','${jsEsc(phone)}','${jsEsc(displayName)}')">📞 Call</button>` : '<span style="color:var(--muted);font-size:12px">No phone</span>'}
             ${retryBtn}
-            <button class="btn-history-row" onclick="showHistory('${p.id}','${esc(displayName)}')">📋</button>
+            <button class="btn-history-row" onclick="showHistory('${p.id}','${jsEsc(displayName)}')">📋</button>
           </div>
         </td>
       </tr>
@@ -1219,6 +1219,11 @@ function esc(s) {
     .replace(/"/g,'&quot;')
     .replace(/'/g,'&#39;');
 }
+
+function jsEsc(s) {
+  return String(s || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"');
+}
+
 
 let toastTimer;
 function toast(msg, type = '') {
